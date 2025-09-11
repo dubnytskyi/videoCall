@@ -1,0 +1,7 @@
+version: "2"
+authtoken: 32VcxtS6eFaojRtQ33ZIlmJjYbN_3sFMxyHX5zkeGsNuXbiUU
+tunnels:
+  frontend:
+    proto: http
+    addr: 5173
+    bind_tls: true

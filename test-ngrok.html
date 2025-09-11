@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ngrok Connection Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test { margin: 10px 0; padding: 10px; border: 1px solid #ccc; }
+        .success { background-color: #d4edda; border-color: #c3e6cb; }
+        .error { background-color: #f8d7da; border-color: #f5c6cb; }
+        button { padding: 10px 20px; margin: 5px; }
+        #logs { background: #f8f9fa; padding: 10px; margin: 10px 0; font-family: monospace; font-size: 12px; max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>🌐 Ngrok Connection Test</h1>
+    
+    <div id="current-url" class="test">
+        <h3>Current URL</h3>
+        <p id="url-display">Loading...</p>
+    </div>
+    
+    <div id="server-test" class="test">
+        <h3>Server Test</h3>
+        <p id="server-status">Testing...</p>
+        <button onclick="testServer()">Test Server</button>
+    </div>
+    
+    <div id="twilio-test" class="test">
+        <h3>Twilio Token Test</h3>
+        <p id="twilio-status">Testing...</p>
+        <button onclick="testTwilio()">Test Twilio</button>
+    </div>
+
+    <div id="logs"></div>
+
+    <script>
+        let serverUrl = null;
+        
+        function log(message) {
+            const logs = document.getElementById('logs');
+            const time = new Date().toLocaleTimeString();
+            logs.innerHTML += `<div>[${time}] ${message}</div>`;
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        function detectServerUrl() {
+            const currentHost = window.location.hostname;
+            const currentProtocol = window.location.protocol;
+            
+            log(`Current hostname: ${currentHost}`);
+            log(`Current protocol: ${currentProtocol}`);
+            
+            if (currentHost.includes("ngrok")) {
+                // If using ngrok, try to find the backend URL
+                const backendUrl = `${currentProtocol}//${currentHost.replace("5173", "4000")}`;
+                log(`Detected ngrok backend URL: ${backendUrl}`);
+                return backendUrl;
+            } else if (currentHost !== "localhost" && currentHost !== "127.0.0.1") {
+                // If not localhost, assume second laptop
+                const backendUrl = "http://192.168.0.150:4000";
+                log(`Using second laptop backend URL: ${backendUrl}`);
+                return backendUrl;
+            } else {
+                // Local development
+                const backendUrl = "http://localhost:4000";
+                log(`Using local backend URL: ${backendUrl}`);
+                return backendUrl;
+            }
+        }
+        
+        async function testServer() {
+            const status = document.getElementById('server-status');
+            const div = document.getElementById('server-test');
+            
+            if (!serverUrl) {
+                serverUrl = detectServerUrl();
+            }
+            
+            try {
+                log(`Testing server connection to: ${serverUrl}`);
+                const response = await fetch(`${serverUrl}/health`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    status.textContent = `✅ Server OK: ${data.status}`;
+                    div.className = 'test success';
+                    log('✅ Server connection successful');
+                } else {
+                    status.textContent = `❌ Server Error: ${data.error}`;
+                    div.className = 'test error';
+                    log('❌ Server error: ' + data.error);
+                }
+            } catch (error) {
+                status.textContent = `❌ Connection Failed: ${error.message}`;
+                div.className = 'test error';
+                log('❌ Server connection failed: ' + error.message);
+                
+                // Try alternative URLs
+                const alternatives = [
+                    "http://localhost:4000",
+                    "https://localhost:4000",
+                    "http://127.0.0.1:4000"
+                ];
+                
+                for (const altUrl of alternatives) {
+                    try {
+                        log(`Trying alternative URL: ${altUrl}`);
+                        const altResponse = await fetch(`${altUrl}/health`);
+                        if (altResponse.ok) {
+                            serverUrl = altUrl;
+                            log(`✅ Found working server URL: ${altUrl}`);
+                            status.textContent = `✅ Server OK (${altUrl})`;
+                            div.className = 'test success';
+                            return;
+                        }
+                    } catch (e) {
+                        log(`❌ Alternative URL failed: ${altUrl}`);
+                    }
+                }
+            }
+        }
+        
+        async function testTwilio() {
+            const status = document.getElementById('twilio-status');
+            const div = document.getElementById('twilio-test');
+            
+            if (!serverUrl) {
+                status.textContent = '❌ No server URL available. Test server first.';
+                div.className = 'test error';
+                return;
+            }
+            
+            try {
+                log(`Testing Twilio token generation with: ${serverUrl}`);
+                const response = await fetch(`${serverUrl}/token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ identity: 'test', room: 'test-room' })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.token) {
+                    status.textContent = `✅ Twilio Token OK: ${data.token.substring(0, 50)}...`;
+                    div.className = 'test success';
+                    log('✅ Twilio token generated successfully');
+                } else {
+                    status.textContent = `❌ Twilio Error: ${data.error}`;
+                    div.className = 'test error';
+                    log('❌ Twilio error: ' + data.error);
+                }
+            } catch (error) {
+                status.textContent = `❌ Twilio Connection Failed: ${error.message}`;
+                div.className = 'test error';
+                log('❌ Twilio connection failed: ' + error.message);
+            }
+        }
+        
+        // Auto-run tests
+        window.onload = function() {
+            const urlDisplay = document.getElementById('url-display');
+            urlDisplay.textContent = window.location.href;
+            
+            log('Starting ngrok connection test...');
+            testServer();
+        };
+    </script>
+</body>
+</html>
+
+

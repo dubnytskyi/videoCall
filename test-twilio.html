@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Twilio Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test { margin: 10px 0; padding: 10px; border: 1px solid #ccc; }
+        .success { background-color: #d4edda; border-color: #c3e6cb; }
+        .error { background-color: #f8d7da; border-color: #f5c6cb; }
+        button { padding: 10px 20px; margin: 5px; }
+        #logs { background: #f8f9fa; padding: 10px; margin: 10px 0; font-family: monospace; font-size: 12px; max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Twilio Video Test</h1>
+    
+    <div id="server-test" class="test">
+        <h3>Server Test</h3>
+        <p id="server-status">Testing...</p>
+        <button onclick="testServer()">Test Server</button>
+    </div>
+    
+    <div id="twilio-test" class="test">
+        <h3>Twilio Token Test</h3>
+        <p id="twilio-status">Testing...</p>
+        <button onclick="testTwilio()">Test Twilio</button>
+    </div>
+    
+    <div id="video-test" class="test">
+        <h3>Twilio Video Test</h3>
+        <p id="video-status">Testing...</p>
+        <button onclick="testVideo()">Test Video Connection</button>
+        <video id="video" width="320" height="240" style="display: none;"></video>
+    </div>
+
+    <div id="logs"></div>
+
+    <script src="https://media.twiliocdn.com/sdk/js/video/releases/2.25.0/twilio-video.min.js"></script>
+    <script>
+        let token = null;
+        
+        function log(message) {
+            const logs = document.getElementById('logs');
+            const time = new Date().toLocaleTimeString();
+            logs.innerHTML += `<div>[${time}] ${message}</div>`;
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        async function testServer() {
+            const status = document.getElementById('server-status');
+            const div = document.getElementById('server-test');
+            
+            try {
+                log('Testing server connection...');
+                const response = await fetch('http://localhost:4000/health');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    status.textContent = `✅ Server OK: ${data.status}`;
+                    div.className = 'test success';
+                    log('✅ Server connection successful');
+                } else {
+                    status.textContent = `❌ Server Error: ${data.error}`;
+                    div.className = 'test error';
+                    log('❌ Server error: ' + data.error);
+                }
+            } catch (error) {
+                status.textContent = `❌ Connection Failed: ${error.message}`;
+                div.className = 'test error';
+                log('❌ Server connection failed: ' + error.message);
+            }
+        }
+        
+        async function testTwilio() {
+            const status = document.getElementById('twilio-status');
+            const div = document.getElementById('twilio-test');
+            
+            try {
+                log('Testing Twilio token generation...');
+                const response = await fetch('http://localhost:4000/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ identity: 'test', room: 'test-room' })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.token) {
+                    token = data.token;
+                    status.textContent = `✅ Twilio Token OK: ${data.token.substring(0, 50)}...`;
+                    div.className = 'test success';
+                    log('✅ Twilio token generated successfully');
+                } else {
+                    status.textContent = `❌ Twilio Error: ${data.error}`;
+                    div.className = 'test error';
+                    log('❌ Twilio error: ' + data.error);
+                }
+            } catch (error) {
+                status.textContent = `❌ Twilio Connection Failed: ${error.message}`;
+                div.className = 'test error';
+                log('❌ Twilio connection failed: ' + error.message);
+            }
+        }
+        
+        async function testVideo() {
+            const status = document.getElementById('video-status');
+            const div = document.getElementById('video-test');
+            const video = document.getElementById('video');
+            
+            if (!token) {
+                status.textContent = '❌ No token available. Test Twilio first.';
+                div.className = 'test error';
+                log('❌ No token available for video test');
+                return;
+            }
+            
+            try {
+                log('Testing Twilio Video connection...');
+                status.textContent = 'Connecting to Twilio Video...';
+                
+                // Create local video track
+                const localVideoTrack = await Twilio.Video.createLocalVideoTrack();
+                log('✅ Local video track created');
+                
+                // Connect to room
+                const room = await Twilio.Video.connect(token, {
+                    tracks: [localVideoTrack],
+                    name: 'test-room'
+                });
+                
+                log('✅ Connected to Twilio room');
+                
+                // Display local video
+                video.srcObject = new MediaStream([localVideoTrack.mediaStreamTrack]);
+                video.style.display = 'block';
+                video.play();
+                
+                status.textContent = '✅ Twilio Video OK';
+                div.className = 'test success';
+                log('✅ Twilio Video test successful');
+                
+                // Clean up after 5 seconds
+                setTimeout(() => {
+                    room.disconnect();
+                    localVideoTrack.stop();
+                    log('✅ Cleaned up video resources');
+                }, 5000);
+                
+            } catch (error) {
+                status.textContent = `❌ Video Error: ${error.message}`;
+                div.className = 'test error';
+                log('❌ Twilio Video error: ' + error.message);
+                
+                if (error.name === 'NotAllowedError') {
+                    log('❌ Camera access denied');
+                } else if (error.name === 'NotFoundError') {
+                    log('❌ No camera found');
+                } else if (error.name === 'NotReadableError') {
+                    log('❌ Camera is being used by another application');
+                }
+            }
+        }
+        
+        // Auto-run tests
+        window.onload = function() {
+            log('Starting Twilio Video test...');
+            testServer();
+            testTwilio();
+        };
+    </script>
+</body>
+</html>
+
+

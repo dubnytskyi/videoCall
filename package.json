@@ -1,0 +1,16 @@
+{
+  "name": "notary-video-call-poc",
+  "version": "1.0.0",
+  "description": "POC: Video call between notary and client with live PDF editing",
+  "scripts": {
+    "dev": "cd client && npm run dev",
+    "client": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "install-all": "npm install && cd client && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
+
+
