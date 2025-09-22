@@ -410,6 +410,68 @@ app.post("/api/room/:roomSid/end", async (req, res) => {
   }
 });
 
+// Wait for recording completion endpoint
+app.post("/api/recording/:recordingSid/wait-completion", async (req, res) => {
+  try {
+    const { recordingSid } = req.params;
+    const { timeout = 30000 } = req.body; // Default 30 seconds timeout
+
+    console.log(`Waiting for recording completion: ${recordingSid}`);
+
+    const startTime = Date.now();
+    const maxWaitTime = timeout;
+    const pollInterval = 2000; // Poll every 2 seconds
+
+    while (Date.now() - startTime < maxWaitTime) {
+      try {
+        const composition = await twilioClient.video
+          .compositions(recordingSid)
+          .fetch();
+
+        console.log(`Recording status: ${composition.status}`);
+
+        if (composition.status === "completed") {
+          return res.json({
+            success: true,
+            status: composition.status,
+            duration: composition.duration,
+            size: composition.size,
+            url: composition.url,
+            roomSid: composition.roomSid,
+          });
+        }
+
+        if (composition.status === "failed") {
+          return res.status(500).json({
+            error: "recording_failed",
+            message: "Recording failed to complete",
+            status: composition.status,
+          });
+        }
+
+        // Wait before next poll
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+      } catch (err) {
+        console.error("Error polling recording status:", err);
+        // Continue polling on transient errors
+      }
+    }
+
+    // Timeout reached
+    res.status(408).json({
+      error: "timeout",
+      message: "Recording completion timeout",
+      recordingSid: recordingSid,
+    });
+  } catch (err) {
+    console.error("Recording wait error:", err);
+    res.status(500).json({
+      error: "recording_wait_failed",
+      message: err instanceof Error ? err.message : "Unknown error",
+    });
+  }
+});
+
 // Disconnect all participants except the provided identity
 app.post("/api/room/:roomSid/kick-others", async (req, res) => {
   try {
