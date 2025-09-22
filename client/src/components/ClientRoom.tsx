@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import VideoRoom from "./VideoRoom";
 import PdfCollaborator from "./PdfCollaborator";
 import { fetchTwilioToken } from "../lib/twilioToken";
 import { CollabOp, Participant } from "../types/collab";
 import { LocalDataTrack } from "twilio-video";
+import { RecordingStatus } from "../lib/recordingService";
 
 export default function ClientRoom() {
   const navigate = useNavigate();
@@ -16,12 +17,25 @@ export default function ClientRoom() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [remoteData, setRemoteData] = useState<CollabOp | null>(null);
+  const [recordingStatus, setRecordingStatus] = useState<RecordingStatus | null>(null);
+  
+  // Stable identity that doesn't change on re-renders
+  const identityRef = useRef<string | null>(null);
+  
+  // Initialize identity only once
+  useEffect(() => {
+    if (!identityRef.current) {
+      identityRef.current = `client-${Math.random().toString(36).substr(2, 9)}`;
+      console.log(`[ClientRoom] Created identity: ${identityRef.current}`);
+    }
+  }, []);
 
   useEffect(() => {
     const getToken = async () => {
       try {
         setIsLoading(true);
-        const token = await fetchTwilioToken("client", "notary-room");
+        const token = await fetchTwilioToken(identityRef.current as string, "notary-room");
         setToken(token);
       } catch (err) {
         console.error("Failed to get token:", err);
@@ -34,21 +48,28 @@ export default function ClientRoom() {
     getToken();
   }, []);
 
-  const handleLocalDataTrack = (track: LocalDataTrack) => {
+  const handleLocalDataTrack = useCallback((track: LocalDataTrack) => {
+    console.log(`[ClientRoom] Received LocalDataTrack:`, track);
     setLocalDataTrack(track);
-  };
+  }, []);
 
-  const handleRemoteData = (data: CollabOp) => {
+  const handleRemoteData = useCallback((data: CollabOp) => {
     // Client receives data from notary
-    console.log("Received data from notary:", data);
-  };
+    console.log("Client received data from notary:", data);
+    setRemoteData(data);
+  }, []);
 
-  const handleParticipantUpdate = (participant: Participant) => {
+  const handleParticipantUpdate = useCallback((participant: Participant) => {
     setParticipantInfo(prev => ({
       ...prev,
       [participant.role]: participant
     }));
-  };
+  }, []);
+
+  const handleRecordingStatusChange = useCallback((status: RecordingStatus | null) => {
+    console.log(`[ClientRoom] Recording status change:`, status);
+    setRecordingStatus(status);
+  }, []);
 
   if (isLoading) {
     return (
@@ -106,11 +127,12 @@ export default function ClientRoom() {
         
         <VideoRoom
           token={token}
-          identity="client"
+          identity={identityRef.current || `client-${Math.random().toString(36).substr(2, 9)}`}
           role="client"
           onLocalDataTrack={handleLocalDataTrack}
           onRemoteData={handleRemoteData}
           onParticipantUpdate={handleParticipantUpdate}
+          onRecordingStatusChange={handleRecordingStatusChange}
         />
         
         <div className="mt-4 p-3 bg-white rounded-lg shadow">
@@ -126,18 +148,40 @@ export default function ClientRoom() {
               <span>Client:</span>
               <span className="text-green-600 font-medium">Connected</span>
             </div>
+            {recordingStatus && (
+              <div className="flex justify-between">
+                <span>Recording:</span>
+                <span className={`font-medium ${
+                  recordingStatus.status === 'in-progress' ? 'text-red-600' :
+                  recordingStatus.status === 'completed' ? 'text-green-600' :
+                  'text-gray-600'
+                }`}>
+                  {recordingStatus.status}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Right Panel - PDF Document */}
+      {/* Right Panel - Document View */}
       <div className="flex-1 p-4">
-        <PdfCollaborator
-          localDataTrack={localDataTrack}
-          onRemoteData={handleRemoteData}
-          isNotary={false}
-          participantInfo={participantInfo}
-        />
+        {localDataTrack ? (
+          <PdfCollaborator
+            localDataTrack={localDataTrack}
+            onRemoteData={handleRemoteData}
+            isNotary={false}
+            participantInfo={participantInfo}
+            remoteData={remoteData}
+          />
+        ) : (
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-4"></div>
+              <p className="text-gray-600">Initializing document viewer...</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

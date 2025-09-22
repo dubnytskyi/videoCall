@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import { CollabOp, DrawOp, TextOp, ClearOp } from "../types/collab";
+import { CollabOp, DrawOp, TextOp, ClearOp, CursorOp } from "../types/collab";
 import { LocalDataTrack } from "twilio-video";
 
 // Set up PDF.js worker
@@ -14,16 +14,24 @@ type Props = {
     notary: { identity: string; isConnected: boolean; isReady: boolean };
     client: { identity: string; isConnected: boolean; isReady: boolean };
   };
+  onCanvasRef?: (canvas: HTMLCanvasElement | null) => void;
+  remoteData?: CollabOp | null;
 };
 
 export default function PdfCollaborator({ 
   localDataTrack, 
-  onRemoteData, 
+  onRemoteData: _onRemoteData, 
   isNotary,
-  participantInfo 
+  participantInfo,
+  onCanvasRef,
+  remoteData
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
+  const compositeRef = useRef<HTMLCanvasElement | null>(null);
+  const compositeRafRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const cursorTimeoutRef = useRef<number | null>(null);
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -31,9 +39,10 @@ export default function PdfCollaborator({
   const [drawingPath, setDrawingPath] = useState<Array<[number, number]>>([]);
   const [drawings, setDrawings] = useState<Map<number, DrawOp[]>>(new Map());
   const [texts, setTexts] = useState<Map<number, TextOp[]>>(new Map());
-  const [scale, setScale] = useState(1.5);
+  const [scale] = useState(1.5);
   const [currentColor, setCurrentColor] = useState("#000000");
   const [currentStrokeWidth, setCurrentStrokeWidth] = useState(2);
+  const [remoteCursor, setRemoteCursor] = useState<{x: number, y: number, page: number, isVisible: boolean} | null>(null);
 
   // Load sample PDF
   useEffect(() => {
@@ -45,8 +54,8 @@ export default function PdfCollaborator({
         const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
         setPdfDoc(pdf);
         setTotalPages(pdf.numPages);
-      } catch (error) {
-        console.error("Error loading PDF:", error);
+      } catch (error: any) {
+        console.error(`[${isNotary ? 'Notary' : 'Client'}] Failed to load PDF:`, error);
         // Fallback: create a simple canvas with text
         createFallbackDocument();
       }
@@ -56,26 +65,43 @@ export default function PdfCollaborator({
   }, []);
 
   const createFallbackDocument = () => {
+    console.log(`[${isNotary ? 'Notary' : 'Client'}] Creating fallback document`);
     // Create a fallback document if PDF loading fails
     setTotalPages(1);
     setPdfDoc({ numPages: 1 });
   };
 
+  // Handle remote data from parent component
+  useEffect(() => {
+    console.log(`[${isNotary ? 'Notary' : 'Client'}] PdfCollaborator mounted with localDataTrack:`, !!localDataTrack);
+    if (localDataTrack) {
+      console.log(`[${isNotary ? 'Notary' : 'Client'}] PdfCollaborator received localDataTrack, should render document editor`);
+    } else {
+      console.log(`[${isNotary ? 'Notary' : 'Client'}] PdfCollaborator waiting for localDataTrack...`);
+    }
+  }, [localDataTrack, isNotary]);
+
   const renderPage = useCallback(async (pageNum: number) => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current) {
+      return;
+    }
 
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
     
-    if (!context) return;
+    if (!context) {
+      return;
+    }
 
     try {
       if (pdfDoc && pdfDoc.numPages) {
         // Render actual PDF page
         const page = await pdfDoc.getPage(pageNum);
         const viewport = page.getViewport({ scale });
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
+        if (canvas.width !== viewport.width || canvas.height !== viewport.height) {
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+        }
 
         await page.render({
           canvasContext: context,
@@ -83,8 +109,12 @@ export default function PdfCollaborator({
         }).promise;
       } else {
         // Render fallback document
-        canvas.width = 612 * scale;
-        canvas.height = 792 * scale;
+        const targetW = 612 * scale;
+        const targetH = 792 * scale;
+        if (canvas.width !== targetW || canvas.height !== targetH) {
+          canvas.width = targetW;
+          canvas.height = targetH;
+        }
         
         // Clear canvas
         context.fillStyle = "#ffffff";
@@ -144,26 +174,67 @@ export default function PdfCollaborator({
         context.fillText("For current processing times, visit: www.cdph.ca.gov", 50, 880);
       }
 
-      // Draw existing drawings for this page
-      const pageDrawings = drawings.get(pageNum) || [];
-      pageDrawings.forEach(draw => {
-        if (draw.type === "draw") {
-          context.strokeStyle = draw.color;
-          context.lineWidth = draw.strokeWidth;
-          context.lineCap = "round";
-          context.lineJoin = "round";
-          
-          context.beginPath();
-          draw.path.forEach(([x, y], index) => {
-            if (index === 0) {
-              context.moveTo(x, y);
-            } else {
-              context.lineTo(x, y);
+      // Size and redraw overlay on top of the PDF canvas
+      const overlay = overlayRef.current;
+      if (overlay) {
+        if (overlay.width !== canvas.width || overlay.height !== canvas.height) {
+          overlay.width = canvas.width;
+          overlay.height = canvas.height;
+        }
+        const octx = overlay.getContext('2d');
+        if (octx) {
+          // Clear overlay
+          octx.clearRect(0, 0, overlay.width, overlay.height);
+
+          // Draw existing drawings for this page on overlay
+          const pageDrawings = drawings.get(pageNum) || [];
+          pageDrawings.forEach(draw => {
+            if (draw.type === "draw") {
+              octx.save();
+              // Ensure no PDF.js transforms affect us
+              octx.setTransform(1, 0, 0, 1, 0, 0);
+              octx.strokeStyle = draw.color;
+              const toCanvasPoint = (pt: [number, number]): [number, number] => (
+                draw.normalized ? [pt[0] * overlay.width, pt[1] * overlay.height] : pt
+              ) as [number, number];
+              octx.lineWidth = Math.max(1, draw.strokeWidth || 1);
+              octx.lineCap = "round";
+              octx.lineJoin = "round";
+              octx.beginPath();
+              draw.path.forEach((p, index) => {
+                const [x, y] = toCanvasPoint(p as [number, number]);
+                if (index === 0) {
+                  octx.moveTo(x, y);
+                } else {
+                  octx.lineTo(x, y);
+                }
+              });
+              octx.stroke();
+              octx.restore();
             }
           });
-          context.stroke();
+
+          // Draw in-progress local stroke
+          if (isNotary && pageNum === currentPage && isDrawing && drawingPath.length > 1) {
+            octx.save();
+            octx.setTransform(1, 0, 0, 1, 0, 0);
+            octx.strokeStyle = currentColor;
+            octx.lineWidth = currentStrokeWidth;
+            octx.lineCap = "round";
+            octx.lineJoin = "round";
+            octx.beginPath();
+            drawingPath.forEach(([x, y], index) => {
+              if (index === 0) {
+                octx.moveTo(x, y);
+              } else {
+                octx.lineTo(x, y);
+              }
+            });
+            octx.stroke();
+            octx.restore();
+          }
         }
-      });
+      }
 
       // Draw existing texts for this page
       const pageTexts = texts.get(pageNum) || [];
@@ -178,11 +249,93 @@ export default function PdfCollaborator({
     } catch (error) {
       console.error("Error rendering page:", error);
     }
-  }, [pdfDoc, scale, drawings, texts]);
+  }, [pdfDoc, scale, drawings, texts, isDrawing, drawingPath, currentColor, currentStrokeWidth, currentPage, isNotary]);
 
   useEffect(() => {
     renderPage(currentPage);
   }, [currentPage, renderPage]);
+
+  // Pass canvas ref to parent for sharing
+  useEffect(() => {
+    console.log(`[PdfCollaborator] useEffect triggered, onCanvasRef:`, !!onCanvasRef);
+    if (!onCanvasRef) return;
+    const base = canvasRef.current;
+    const overlay = overlayRef.current;
+    console.log(`[PdfCollaborator] Canvas refs:`, { base: !!base, overlay: !!overlay });
+    if (!base || !overlay) return;
+
+    // Create or sync composite canvas
+    if (!compositeRef.current) {
+      compositeRef.current = document.createElement('canvas');
+    }
+    const composite = compositeRef.current;
+
+    const step = () => {
+      if (!base || !overlay || !composite) return;
+      if (composite.width !== base.width || composite.height !== base.height) {
+        composite.width = base.width;
+        composite.height = base.height;
+        console.log(`[PdfCollaborator] Composite canvas resized to: ${composite.width}x${composite.height}`);
+      }
+      const cctx = composite.getContext('2d');
+      if (cctx) {
+        // Draw base PDF content
+        cctx.clearRect(0, 0, composite.width, composite.height);
+        cctx.drawImage(base, 0, 0);
+        // Draw overlay annotations
+        cctx.drawImage(overlay, 0, 0);
+        
+        // Add a visual indicator that this canvas is being captured
+        cctx.fillStyle = 'rgba(255, 0, 0, 0.1)';
+        cctx.fillRect(0, 0, composite.width, composite.height);
+        cctx.fillStyle = 'red';
+        cctx.font = '16px Arial';
+        cctx.fillText('RECORDING', 10, 30);
+      }
+      compositeRafRef.current = requestAnimationFrame(step);
+    };
+
+    // Start composite loop and provide composite canvas to parent
+    // Wait a bit for canvas to be properly sized
+    const startComposite = () => {
+      console.log(`[PdfCollaborator] Checking canvas readiness:`, {
+        base: !!base,
+        overlay: !!overlay,
+        baseWidth: base?.width,
+        baseHeight: base?.height,
+        overlayWidth: overlay?.width,
+        overlayHeight: overlay?.height
+      });
+      
+      if (base && overlay && base.width > 0 && base.height > 0) {
+        console.log(`[PdfCollaborator] Starting composite with base canvas: ${base.width}x${base.height}`);
+        // Ensure composite canvas has correct size BEFORE exposing to parent
+        if (composite.width !== base.width || composite.height !== base.height) {
+          composite.width = base.width;
+          composite.height = base.height;
+        }
+        const cctx = composite.getContext('2d');
+        if (cctx) {
+          cctx.clearRect(0, 0, composite.width, composite.height);
+          cctx.drawImage(base, 0, 0);
+          cctx.drawImage(overlay, 0, 0);
+        }
+        onCanvasRef(composite);
+        compositeRafRef.current = requestAnimationFrame(step);
+      } else {
+        console.log(`[PdfCollaborator] Base canvas not ready yet, retrying...`);
+        setTimeout(startComposite, 100);
+      }
+    };
+    
+    startComposite();
+
+    return () => {
+      if (compositeRafRef.current) cancelAnimationFrame(compositeRafRef.current);
+      compositeRafRef.current = null;
+      onCanvasRef(null);
+    };
+  }, [onCanvasRef]);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isNotary) return;
@@ -191,36 +344,84 @@ export default function PdfCollaborator({
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / scale;
-    const y = (e.clientY - rect.top) / scale;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    console.log(`[PdfCollaborator] Mouse down at canvas coordinates: (${x}, ${y}), scale: ${scale}, canvas size: ${canvas.width}x${canvas.height}`);
 
     setIsDrawing(true);
     setDrawingPath([[x, y]]);
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !isNotary) return;
+    if (!isNotary) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / scale;
-    const y = (e.clientY - rect.top) / scale;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
 
-    setDrawingPath(prev => [...prev, [x, y]]);
+    // Send cursor position to remote participants
+    if (localDataTrack) {
+      const normX = x / canvas.width;
+      const normY = y / canvas.height;
+      const cursorOp: CursorOp = {
+        type: "cursor",
+        x: normX,
+        y: normY,
+        page: currentPage,
+        isVisible: true,
+        normalized: true
+      };
+      localDataTrack.send(JSON.stringify(cursorOp));
+    }
+
+    // Continue drawing if in drawing mode
+    if (isDrawing) {
+      setDrawingPath(prev => {
+        const nextPath = [...prev, [x, y] as [number, number]];
+
+        // Stream incremental segment to remote for real-time rendering
+        if (localDataTrack && prev.length > 0) {
+          const lastPoint = prev[prev.length - 1];
+          const drawOp: DrawOp = {
+            type: "draw",
+            page: currentPage,
+            path: [
+              [lastPoint[0] / canvas.width, lastPoint[1] / canvas.height],
+              [x / canvas.width, y / canvas.height]
+            ],
+            color: currentColor,
+            strokeWidth: currentStrokeWidth,
+            normalized: true,
+          };
+          try {
+            localDataTrack.send(JSON.stringify(drawOp));
+          } catch (err) {
+            console.warn("Failed to send incremental draw op", err);
+          }
+        }
+
+        return nextPath;
+      });
+    }
   };
 
   const handleMouseUp = () => {
     if (!isDrawing || !isNotary || !localDataTrack) return;
 
+    const canvas = canvasRef.current!;
     const drawOp: DrawOp = {
       type: "draw",
       page: currentPage,
-      path: drawingPath,
+      path: drawingPath.map(([px, py]) => [px / canvas.width, py / canvas.height] as [number, number]),
       color: currentColor,
       strokeWidth: currentStrokeWidth,
+      normalized: true,
     };
+
+    console.log(`[PdfCollaborator] Sending draw operation:`, drawOp);
 
     // Update local state
     setDrawings(prev => {
@@ -237,8 +438,51 @@ export default function PdfCollaborator({
     setDrawingPath([]);
   };
 
+  const handleMouseLeave = () => {
+    if (!isNotary || !localDataTrack) return;
+
+    // Hide cursor when mouse leaves canvas
+    const cursorOp: CursorOp = {
+      type: "cursor",
+      x: 0,
+      y: 0,
+      page: currentPage,
+      isVisible: false,
+      normalized: true
+    };
+    localDataTrack.send(JSON.stringify(cursorOp));
+  };
+
   const handleRemoteData = (data: CollabOp) => {
     if (data.type === "draw") {
+      console.log(`[PdfCollaborator] Received remote draw operation:`, data);
+      // For incremental segments (2 points), draw directly on canvas to avoid full re-render
+      if (data.path.length === 2) {
+        const overlay = overlayRef.current;
+        const ctx = overlay ? overlay.getContext("2d") : null;
+        if (overlay && ctx && data.page === currentPage) {
+          const toPx = (pt: [number, number]): [number, number] => (
+            data.normalized ? [pt[0] * overlay.width, pt[1] * overlay.height] : pt
+          ) as [number, number];
+          const [p0, p1] = data.path as [number, number][];
+          const [x0, y0] = toPx(p0);
+          const [x1, y1] = toPx(p1);
+          ctx.save();
+          ctx.strokeStyle = data.color;
+          ctx.lineWidth = Math.max(1, data.strokeWidth || 1);
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(x1, y1);
+          ctx.stroke();
+          ctx.restore();
+          // Do not update drawings to avoid triggering renderPage; keep it lightweight
+          return;
+        }
+      }
+
+      // For completed strokes (path > 2) or non-incremental, update drawings and let effect re-render
       setDrawings(prev => {
         const newDrawings = new Map(prev);
         const pageDrawings = newDrawings.get(data.page) || [];
@@ -263,16 +507,62 @@ export default function PdfCollaborator({
         newTexts.set(data.page, []);
         return newTexts;
       });
+    } else if (data.type === "cursor") {
+      // Debounce cursor updates to prevent excessive re-renders
+      if (cursorTimeoutRef.current) {
+        clearTimeout(cursorTimeoutRef.current);
+      }
+      
+      cursorTimeoutRef.current = setTimeout(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) {
+          return;
+        }
+        const pixelX = (data as any).normalized ? data.x * canvas.width : data.x;
+        const pixelY = (data as any).normalized ? data.y * canvas.height : data.y;
+        setRemoteCursor({
+          x: pixelX,
+          y: pixelY,
+          page: data.page,
+          isVisible: data.isVisible
+        });
+      }, 16); // ~60fps
+      
+      // Cursor updates don't need page re-render
+      return;
     }
 
-    // Re-render the current page
-    renderPage(currentPage);
+    // Don't re-render immediately - let useEffect handle it
   };
 
-  // Set up remote data handler
+  // Handle remote data when it changes
   useEffect(() => {
-    onRemoteData(handleRemoteData);
-  }, [onRemoteData]);
+    if (remoteData) {
+      handleRemoteData(remoteData);
+    }
+  }, [remoteData]);
+
+  // Re-render page when drawings or texts change for current page
+  useEffect(() => {
+    if (pdfDoc && canvasRef.current) {
+      renderPage(currentPage);
+    }
+  }, [drawings, texts, currentPage, pdfDoc]);
+
+  // Update cursor position without re-rendering the page
+  useEffect(() => {
+    // Cursor updates don't need to trigger page re-render
+    // The cursor is rendered separately in the JSX
+  }, [remoteCursor]);
+
+  // Cleanup cursor timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (cursorTimeoutRef.current) {
+        clearTimeout(cursorTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const clearPage = () => {
     if (!isNotary || !localDataTrack) return;
@@ -303,7 +593,7 @@ export default function PdfCollaborator({
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b bg-gray-50">
         <h2 className="text-lg font-semibold text-gray-800">
-          Document Preview
+          {isNotary ? 'Document Editor' : 'Document View (Read-only)'}
         </h2>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
@@ -360,11 +650,32 @@ export default function PdfCollaborator({
             <canvas
               ref={canvasRef}
               className="border border-gray-300 shadow-lg"
+            />
+            <canvas
+              ref={overlayRef}
+              className="absolute top-0 left-0 pointer-events-auto"
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseLeave}
               style={{ cursor: isNotary ? 'crosshair' : 'default' }}
             />
+            
+            {/* Remote cursor indicator */}
+            {!isNotary && remoteCursor && remoteCursor.isVisible && remoteCursor.page === currentPage && (
+              <div
+                className="absolute pointer-events-none z-10"
+                style={{
+                  left: remoteCursor.x,
+                  top: remoteCursor.y,
+                  transform: 'translate(-50%, -50%)'
+                }}
+              >
+                <div className="w-4 h-4 bg-red-500 rounded-full border-2 border-white shadow-lg animate-pulse">
+                  <div className="w-2 h-2 bg-white rounded-full absolute top-1 left-1"></div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

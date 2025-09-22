@@ -53,3 +53,9 @@ echo ""
 echo "Make sure to configure your Twilio credentials in server/.env first!"
 
 
+
+
+
+
+
+

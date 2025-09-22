@@ -15,14 +15,6 @@ export const config = {
 
 // Helper function to get server URL
 export function getServerUrl(): string {
-  // In production (Vercel), use the deployed API
-  if (
-    typeof window !== "undefined" &&
-    window.location.hostname.includes("vercel.app")
-  ) {
-    return `https://${window.location.hostname}`;
-  }
-
-  // In development, use local server
-  return "http://localhost:4000";
+  // Always use Vercel server for development and production
+  return "https://video-call-azure-two.vercel.app";
 }

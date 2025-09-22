@@ -8,6 +8,7 @@ A proof-of-concept application for video calls between a notary and client with 
 - **Live PDF Editing**: Notary can draw and add text annotations to PDF documents
 - **Real-time Synchronization**: All changes are synchronized in real-time using Twilio DataTrack
 - **Role-based Access**: Notary can edit, client can view
+- **Video Recording**: Notary can record the entire session (NEW!)
 - **Modern UI**: Clean interface matching the provided mockup
 - **Easy Deployment**: Deploy to Vercel with one command
 
@@ -21,12 +22,14 @@ A proof-of-concept application for video calls between a notary and client with 
 
 ### Backend (Node.js + Express)
 - Twilio Video Access Token generation
+- Video recording management via Compositions API
 - RESTful API endpoints
 - CORS support for frontend integration
 
 ### Twilio Services
 - Programmable Video for P2P video calls
 - DataTrack for real-time collaboration data
+- Video Compositions API for session recording
 
 ## Quick Start
 
@@ -100,6 +103,13 @@ The application uses Twilio DataTrack to send JSON messages containing:
 - Connection status indicators
 - Participant role management
 
+### Recording System
+- Session recording using Twilio Video Compositions API
+- MP4 format with grid layout of all participants
+- Notary-controlled recording (start/stop)
+- Real-time recording status display
+- Automatic completion when room ends
+
 ## File Structure
 
 ```
@@ -143,6 +153,32 @@ notary-poc/
    - Check if `sample.pdf` exists in `client/public/`
    - Verify PDF.js worker is loading correctly
    - Check browser console for PDF.js errors
+
+4. **Recording Not Working**
+   - Ensure `TWILIO_AUTH_TOKEN` is set in server/.env
+   - Check that room has active participants with video/audio
+   - Verify Twilio Video Compositions API is enabled
+   - Check server logs for recording errors
+
+## Recording Setup
+
+For detailed recording setup instructions, see [RECORDING_SETUP.md](./RECORDING_SETUP.md).
+
+### Quick Recording Setup
+
+1. Add to `server/.env`:
+   ```env
+   TWILIO_AUTH_TOKEN=your_auth_token
+   ```
+
+2. Start recording as notary:
+   - Click the red record button in the video panel
+   - Recording starts automatically
+   - Status is shown in real-time
+
+3. Recording completes when room ends
+   - Download link appears when ready
+   - Files are stored in Twilio cloud
 
 ### Development Tips
 

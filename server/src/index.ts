@@ -158,10 +158,26 @@ app.post("/api/recording/start", async (req, res) => {
       roomSid: roomSid,
       audioSources: ["*"],
       videoLayout: {
-        grid: {
-          // Prefer the PDF canvas track if present, then include everything else
-          video_sources: ["pdf-canvas", "screen", "*"] as any,
-        },
+        custom: {
+          video_sources: [
+            // Left side: video calls (camera feeds)
+            {
+              x_pos: 0,
+              y_pos: 0,
+              width: 640,
+              height: 480,
+              video_sources: ["*"]
+            },
+            // Right side: PDF document
+            {
+              x_pos: 640,
+              y_pos: 0,
+              width: 640,
+              height: 480,
+              video_sources: ["pdf-canvas"]
+            }
+          ]
+        }
       },
       format: "mp4",
       statusCallback: `${
