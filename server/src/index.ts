@@ -158,31 +158,31 @@ app.post("/api/recording/start", async (req, res) => {
       roomSid: roomSid,
       audioSources: ["*"],
       videoLayout: {
-        // Left column: people stacked vertically
+        // Left column: people stacked vertically (640x720)
         people: {
           x_pos: 0,
           y_pos: 0,
-          width: 960,
-          height: 1080,
+          width: 640,
+          height: 720,
           z_pos: 2,
           max_rows: 2,
           max_columns: 1,
           reuse: "show_newest",
           video_sources: ["camera", "*"],
         },
-        // Right column: PDF canvas full height
+        // Right column: PDF canvas full height (640x720)
         pdf: {
-          x_pos: 960,
+          x_pos: 640,
           y_pos: 0,
-          width: 960,
-          height: 1080,
+          width: 640,
+          height: 720,
           z_pos: 1,
           video_sources: ["pdf-canvas"],
         },
       },
       format: "mp4",
-      // Bump output resolution to improve document clarity
-      resolution: "1920x1080",
+      // Use 1280x720 to satisfy Twilio limits and maintain clarity
+      resolution: "1280x720",
       statusCallback: `${
         process.env.SERVER_URL || "http://localhost:4000"
       }/api/recording/status`,
