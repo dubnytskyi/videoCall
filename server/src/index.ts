@@ -316,12 +316,10 @@ app.get("/api/recording/:recordingSid/media", async (req, res) => {
     const accountSid = process.env.TWILIO_ACCOUNT_SID as string;
     const authToken = process.env.TWILIO_AUTH_TOKEN as string;
     if (!accountSid || !authToken) {
-      return res
-        .status(500)
-        .json({
-          error: "config_error",
-          message: "Twilio credentials not configured",
-        });
+      return res.status(500).json({
+        error: "config_error",
+        message: "Twilio credentials not configured",
+      });
     }
 
     const authHeader = `Basic ${Buffer.from(
@@ -357,20 +355,16 @@ app.get("/api/recording/:recordingSid/media", async (req, res) => {
     }
 
     const text = await twilioResp.text().catch(() => "");
-    return res
-      .status(500)
-      .json({
-        error: "recording_media_failed",
-        message: `Unexpected status ${twilioResp.status}: ${text}`,
-      });
+    return res.status(500).json({
+      error: "recording_media_failed",
+      message: `Unexpected status ${twilioResp.status}: ${text}`,
+    });
   } catch (err: any) {
     console.error("Recording media fetch error:", err);
-    return res
-      .status(500)
-      .json({
-        error: "recording_media_failed",
-        message: err?.message || String(err),
-      });
+    return res.status(500).json({
+      error: "recording_media_failed",
+      message: err?.message || String(err),
+    });
   }
 });
 
@@ -393,6 +387,31 @@ app.post("/api/room/:roomSid/end", async (req, res) => {
       error: "room_end_failed",
       message: err instanceof Error ? err.message : "Unknown error",
     });
+  }
+});
+
+// Update recording rules for a room
+app.post("/api/room/:roomSid/recording-rules", async (req, res) => {
+  try {
+    const { roomSid } = req.params;
+    const { rules } = req.body || {};
+    if (!Array.isArray(rules)) {
+      return res
+        .status(400)
+        .json({ error: "invalid_rules", message: "rules must be an array" });
+    }
+    const updated = await (twilioClient as any).video
+      .rooms(roomSid)
+      .recordingRules.update({ rules });
+    res.json({ success: true, rules: updated.rules || rules });
+  } catch (err) {
+    console.error("Recording rules update error:", err);
+    res
+      .status(500)
+      .json({
+        error: "rules_update_failed",
+        message: err instanceof Error ? err.message : "Unknown error",
+      });
   }
 });
 
