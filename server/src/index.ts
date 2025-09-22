@@ -182,18 +182,7 @@ app.post("/api/recording/stop", async (req, res) => {
       .compositions(recordingSid)
       .fetch();
 
-    // Try to end the room to finalize the composition
-    const roomSid = composition.roomSid;
-    if (roomSid) {
-      try {
-        console.log(`Attempting to complete room: ${roomSid}`);
-        await twilioClient.video
-          .rooms(roomSid)
-          .update({ status: "completed" as any });
-      } catch (e) {
-        console.warn(`Could not complete room ${roomSid}:`, e);
-      }
-    }
+    // Do NOT end the room here; finishing the room disconnects participants.
 
     // Poll composition until it's completed or timeout
     const maxAttempts = 15; // ~30s total
