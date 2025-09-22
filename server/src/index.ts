@@ -167,7 +167,8 @@ app.post("/api/recording/start", async (req, res) => {
               y_pos: 0,
               width: 640,
               height: 720,
-              video_sources: ["*", { exclude: "pdf-canvas" }], // All except pdf-canvas
+              video_sources: ["*"],
+              video_sources_excluded: ["pdf-canvas"],
             },
             right: {
               // Right side: PDF document (full height)
