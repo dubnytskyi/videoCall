@@ -158,23 +158,35 @@ app.post("/api/recording/start", async (req, res) => {
       roomSid: roomSid,
       audioSources: ["*"],
       videoLayout: {
-        pdf: {
-          x_pos: 0.5,
-          y_pos: 0,
-          width: 0.5,
-          height: 1,
-          video_sources: ["pdf-canvas"] as any,
-          z_pos: 1,
-        },
-        people: {
-          x_pos: 0,
-          y_pos: 0,
-          width: 0.5,
-          height: 1,
-          max_rows: 2,
-          max_columns: 1,
-          video_sources: ["camera"] as any,
-          z_pos: 1,
+        custom: {
+          dimensions: {
+            width: 1920,
+            height: 1080,
+          },
+          regions: [
+            {
+              // Left side for people
+              id: "people",
+              x: "0%",
+              y: "0%",
+              width: "50%",
+              height: "100%",
+              video_sources: ["camera", "*"],
+              max_rows: 2,
+              max_columns: 1,
+              z_pos: 1,
+            },
+            {
+              // Right side for PDF document
+              id: "pdf",
+              x: "50%",
+              y: "0%",
+              width: "50%",
+              height: "100%",
+              video_sources: ["pdf-canvas"],
+              z_pos: 1,
+            },
+          ],
         },
       },
       format: "mp4",
