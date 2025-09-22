@@ -158,26 +158,8 @@ app.post("/api/recording/start", async (req, res) => {
       roomSid: roomSid,
       audioSources: ["*"],
       videoLayout: {
-        // Left column: people stacked vertically (640x720)
-        people: {
-          x_pos: 0,
-          y_pos: 0,
-          width: 640,
-          height: 720,
-          z_pos: 2,
-          max_rows: 2,
-          max_columns: 1,
-          reuse: "show_newest",
-          video_sources: ["camera", "*"],
-        },
-        // Right column: PDF canvas full height (640x720)
-        pdf: {
-          x_pos: 640,
-          y_pos: 0,
-          width: 640,
-          height: 720,
-          z_pos: 1,
-          video_sources: ["pdf-canvas"],
+        grid: {
+          video_sources: ["pdf-canvas", "camera", "*"],
         },
       },
       format: "mp4",
@@ -414,13 +396,18 @@ app.post("/api/room/:roomSid/end", async (req, res) => {
 app.post("/api/recording/:recordingSid/wait-completion", async (req, res) => {
   try {
     const { recordingSid } = req.params;
-    const { timeout = 30000 } = req.body; // Default 30 seconds timeout
+    const { timeout = 60000 } = req.body; // Default 1 minute timeout
 
-    console.log(`Waiting for recording completion: ${recordingSid}`);
+    console.log(
+      `Waiting for recording completion: ${recordingSid}, timeout: ${timeout}ms`
+    );
 
     const startTime = Date.now();
     const maxWaitTime = timeout;
-    const pollInterval = 2000; // Poll every 2 seconds
+    const pollInterval = 3000; // Poll every 3 seconds
+
+    let lastStatus = "";
+    let pollCount = 0;
 
     while (Date.now() - startTime < maxWaitTime) {
       try {
@@ -428,9 +415,21 @@ app.post("/api/recording/:recordingSid/wait-completion", async (req, res) => {
           .compositions(recordingSid)
           .fetch();
 
-        console.log(`Recording status: ${composition.status}`);
+        pollCount++;
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+        // Log status changes or every 10th poll
+        if (composition.status !== lastStatus || pollCount % 10 === 0) {
+          console.log(
+            `Recording status: ${composition.status} (poll #${pollCount}, ${elapsed}s elapsed)`
+          );
+          lastStatus = composition.status;
+        }
 
         if (composition.status === "completed") {
+          console.log(
+            `Recording completed after ${elapsed}s and ${pollCount} polls`
+          );
           return res.json({
             success: true,
             status: composition.status,
@@ -442,6 +441,7 @@ app.post("/api/recording/:recordingSid/wait-completion", async (req, res) => {
         }
 
         if (composition.status === "failed") {
+          console.log(`Recording failed after ${elapsed}s`);
           return res.status(500).json({
             error: "recording_failed",
             message: "Recording failed to complete",
@@ -452,16 +452,23 @@ app.post("/api/recording/:recordingSid/wait-completion", async (req, res) => {
         // Wait before next poll
         await new Promise((resolve) => setTimeout(resolve, pollInterval));
       } catch (err) {
-        console.error("Error polling recording status:", err);
+        console.error(
+          `Error polling recording status (poll #${pollCount}):`,
+          err
+        );
         // Continue polling on transient errors
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
       }
     }
 
     // Timeout reached
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    console.log(`Recording timeout after ${elapsed}s and ${pollCount} polls`);
     res.status(408).json({
       error: "timeout",
-      message: "Recording completion timeout",
+      message: `Recording completion timeout after ${elapsed}s`,
       recordingSid: recordingSid,
+      polls: pollCount,
     });
   } catch (err) {
     console.error("Recording wait error:", err);
