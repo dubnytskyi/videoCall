@@ -311,41 +311,66 @@ app.get("/api/recording/:recordingSid/media", async (req, res) => {
   try {
     const { recordingSid } = req.params;
 
-    // Twilio provides a temporary media location for direct download
-    const media = await (twilioClient as any).video
-      .compositions(recordingSid)
-      .media()
-      .fetch();
-
-    const mediaLocation =
-      media?.redirectTo ||
-      media?.mediaLocation ||
-      media?.location ||
-      media?.url;
-    if (!mediaLocation) {
-      return res.status(202).json({
-        status: "processing",
-        message: "Media not ready yet. Try again shortly.",
-      });
+    // Use Twilio REST Media endpoint (redirect) with Basic auth
+    const mediaEndpoint = `https://video.twilio.com/v1/Compositions/${recordingSid}/Media?Ttl=3600`;
+    const accountSid = process.env.TWILIO_ACCOUNT_SID as string;
+    const authToken = process.env.TWILIO_AUTH_TOKEN as string;
+    if (!accountSid || !authToken) {
+      return res
+        .status(500)
+        .json({
+          error: "config_error",
+          message: "Twilio credentials not configured",
+        });
     }
 
-    // Redirect the client to the temporary media URL
-    return res.redirect(302, mediaLocation);
-  } catch (err: any) {
-    const message = err?.message || String(err);
-    if (message.includes("not found") || err?.status === 404) {
+    const authHeader = `Basic ${Buffer.from(
+      `${accountSid}:${authToken}`
+    ).toString("base64")}`;
+    const twilioResp = await fetch(mediaEndpoint, {
+      method: "GET",
+      headers: { Authorization: authHeader },
+      redirect: "manual",
+    } as any);
+
+    if (twilioResp.status === 302) {
+      const location = twilioResp.headers.get("location");
+      if (location) return res.redirect(302, location);
+    }
+    if (twilioResp.status === 404) {
       return res
         .status(404)
         .json({ error: "not_found", message: "Recording not found" });
     }
-    if (err?.status === 409 || err?.status === 423) {
+    if ([409, 423, 425, 202].includes(twilioResp.status)) {
       return res.status(202).json({ status: "processing" });
     }
+    if (twilioResp.status === 200) {
+      // Some responses may include JSON with media location
+      const data: any = await twilioResp.json().catch(() => ({} as any));
+      const location = (data?.redirect_to ||
+        data?.media_location ||
+        data?.location ||
+        data?.url) as string | undefined;
+      if (location) return res.redirect(302, location);
+      return res.status(202).json({ status: "processing" });
+    }
+
+    const text = await twilioResp.text().catch(() => "");
+    return res
+      .status(500)
+      .json({
+        error: "recording_media_failed",
+        message: `Unexpected status ${twilioResp.status}: ${text}`,
+      });
+  } catch (err: any) {
     console.error("Recording media fetch error:", err);
-    res.status(500).json({
-      error: "recording_media_failed",
-      message,
-    });
+    return res
+      .status(500)
+      .json({
+        error: "recording_media_failed",
+        message: err?.message || String(err),
+      });
   }
 });
 
@@ -366,6 +391,56 @@ app.post("/api/room/:roomSid/end", async (req, res) => {
     console.error("Room end error:", err);
     res.status(500).json({
       error: "room_end_failed",
+      message: err instanceof Error ? err.message : "Unknown error",
+    });
+  }
+});
+
+// Inspect room details
+app.get("/api/room/:roomSid", async (req, res) => {
+  try {
+    const { roomSid } = req.params;
+    const room = await (twilioClient as any).video.rooms(roomSid).fetch();
+    // Recording rules fetch is not directly available; expose basic fields
+    res.json({
+      sid: room.sid,
+      uniqueName: room.uniqueName,
+      type: (room as any).type,
+      status: room.status,
+      dateCreated: room.dateCreated,
+      dateUpdated: room.dateUpdated,
+    });
+  } catch (err) {
+    console.error("Room fetch error:", err);
+    res.status(500).json({
+      error: "room_fetch_failed",
+      message: err instanceof Error ? err.message : "Unknown error",
+    });
+  }
+});
+
+// List compositions for a room
+app.get("/api/room/:roomSid/compositions", async (req, res) => {
+  try {
+    const { roomSid } = req.params;
+    const comps = await (twilioClient as any).video.compositions.list({
+      limit: 20,
+      roomSid,
+    });
+    res.json(
+      comps.map((c: any) => ({
+        sid: c.sid,
+        status: c.status,
+        duration: c.duration,
+        size: c.size,
+        url: c.url,
+        dateCreated: c.dateCreated,
+      }))
+    );
+  } catch (err) {
+    console.error("Room compositions list error:", err);
+    res.status(500).json({
+      error: "room_compositions_failed",
       message: err instanceof Error ? err.message : "Unknown error",
     });
   }
