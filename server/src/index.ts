@@ -166,7 +166,7 @@ app.post("/api/recording/start", async (req, res) => {
               y_pos: 0,
               width: 640,
               height: 480,
-              video_sources: ["*"]
+              video_sources: ["*"],
             },
             // Right side: PDF document
             {
@@ -174,10 +174,10 @@ app.post("/api/recording/start", async (req, res) => {
               y_pos: 0,
               width: 640,
               height: 480,
-              video_sources: ["pdf-canvas"]
-            }
-          ]
-        }
+              video_sources: ["pdf-canvas"],
+            },
+          ],
+        },
       },
       format: "mp4",
       statusCallback: `${
