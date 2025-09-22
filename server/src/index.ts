@@ -160,8 +160,8 @@ app.post("/api/recording/start", async (req, res) => {
       resolution: "1280x720",
       videoLayout: {
         custom: {
-          left: {
-            // Left side: video calls (camera feeds)
+          video_calls: {
+            z_pos: 1,
             x_pos: 0,
             y_pos: 0,
             width: 640,
@@ -169,13 +169,13 @@ app.post("/api/recording/start", async (req, res) => {
             video_sources: ["*"],
             video_sources_excluded: ["pdf-canvas"],
           },
-          right: {
-            // Right side: PDF document (full height)
+          pdf_document: {
+            z_pos: 2,
             x_pos: 640,
             y_pos: 0,
             width: 640,
             height: 720,
-            video_sources: ["pdf-canvas"], // Only pdf-canvas
+            video_sources: ["pdf-canvas"],
           },
         },
       },
