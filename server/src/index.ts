@@ -402,10 +402,11 @@ app.post("/api/room/:roomSid/kick-others", async (req, res) => {
     // List participants via REST (participants API is limited; we use Participants list)
     const participants = await (twilioClient as any).video
       .rooms(roomSid)
-      .participants
-      .list({ status: "connected", limit: 50 });
+      .participants.list({ status: "connected", limit: 50 });
 
-    const toDisconnect = participants.filter((p: any) => p.identity !== keepIdentity);
+    const toDisconnect = participants.filter(
+      (p: any) => p.identity !== keepIdentity
+    );
     for (const p of toDisconnect) {
       try {
         await (twilioClient as any).video
@@ -413,14 +414,25 @@ app.post("/api/room/:roomSid/kick-others", async (req, res) => {
           .participants(p.sid)
           .update({ status: "disconnected" });
       } catch (e) {
-        console.warn(`Failed to disconnect participant ${p.identity} (${p.sid})`, e);
+        console.warn(
+          `Failed to disconnect participant ${p.identity} (${p.sid})`,
+          e
+        );
       }
     }
 
-    res.json({ success: true, disconnected: toDisconnect.map((p: any) => p.identity) });
+    res.json({
+      success: true,
+      disconnected: toDisconnect.map((p: any) => p.identity),
+    });
   } catch (err) {
     console.error("Kick-others error:", err);
-    res.status(500).json({ error: "kick_failed", message: err instanceof Error ? err.message : "Unknown error" });
+    res
+      .status(500)
+      .json({
+        error: "kick_failed",
+        message: err instanceof Error ? err.message : "Unknown error",
+      });
   }
 });
 
@@ -440,12 +452,10 @@ app.post("/api/room/:roomSid/recording-rules", async (req, res) => {
     res.json({ success: true, rules: updated.rules || rules });
   } catch (err) {
     console.error("Recording rules update error:", err);
-    res
-      .status(500)
-      .json({
-        error: "rules_update_failed",
-        message: err instanceof Error ? err.message : "Unknown error",
-      });
+    res.status(500).json({
+      error: "rules_update_failed",
+      message: err instanceof Error ? err.message : "Unknown error",
+    });
   }
 });
 
