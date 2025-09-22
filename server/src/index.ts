@@ -178,6 +178,8 @@ app.post("/api/recording/start", async (req, res) => {
         },
       },
       format: "mp4",
+      // Bump output resolution to improve document clarity
+      resolution: "1920x1080",
       statusCallback: `${
         process.env.SERVER_URL || "http://localhost:4000"
       }/api/recording/status`,
