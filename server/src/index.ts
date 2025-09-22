@@ -134,6 +134,24 @@ app.post("/api/recording/start", async (req, res) => {
 
     // First, get the room to ensure it exists
     const room = await twilioClient.video.rooms(roomSid).fetch();
+    console.log(`Room fetched for recording start:`, {
+      sid: room.sid,
+      type: (room as any).type,
+      status: room.status,
+    });
+
+    // Enable recording for all participants via Recording Rules (requires Group/Group Small room)
+    try {
+      await (twilioClient as any).video
+        .rooms(roomSid)
+        .recordingRules.update({ rules: [{ type: "include", all: true }] });
+      console.log(`Recording rules enabled (include all) for room ${roomSid}`);
+    } catch (e) {
+      console.warn(
+        `Could not enable recording rules for room ${roomSid}. Ensure room type is Group/Group Small.`,
+        e
+      );
+    }
 
     // Create composition for recording using the correct API
     const composition = await twilioClient.video.compositions.create({
@@ -183,6 +201,21 @@ app.post("/api/recording/stop", async (req, res) => {
       .fetch();
 
     // Do NOT end the room here; finishing the room disconnects participants.
+
+    // Optionally stop recording of new media (keep existing media) by disabling rules
+    try {
+      const compRoomSid = composition.roomSid;
+      if (compRoomSid) {
+        await (twilioClient as any).video
+          .rooms(compRoomSid)
+          .recordingRules.update({ rules: [{ type: "exclude", all: true }] });
+        console.log(
+          `Recording rules disabled (exclude all) for room ${compRoomSid}`
+        );
+      }
+    } catch (e) {
+      console.warn(`Could not disable recording rules.`, e);
+    }
 
     // Poll composition until it's completed or timeout
     const maxAttempts = 15; // ~30s total
