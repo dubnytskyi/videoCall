@@ -284,6 +284,49 @@ app.get("/api/recording/:recordingSid", async (req, res) => {
   }
 });
 
+// Get downloadable media URL (redirect) for a composition
+app.get("/api/recording/:recordingSid/media", async (req, res) => {
+  try {
+    const { recordingSid } = req.params;
+
+    // Twilio provides a temporary media location for direct download
+    const media = await (twilioClient as any).video
+      .compositions(recordingSid)
+      .media()
+      .fetch();
+
+    const mediaLocation =
+      media?.redirectTo ||
+      media?.mediaLocation ||
+      media?.location ||
+      media?.url;
+    if (!mediaLocation) {
+      return res.status(202).json({
+        status: "processing",
+        message: "Media not ready yet. Try again shortly.",
+      });
+    }
+
+    // Redirect the client to the temporary media URL
+    return res.redirect(302, mediaLocation);
+  } catch (err: any) {
+    const message = err?.message || String(err);
+    if (message.includes("not found") || err?.status === 404) {
+      return res
+        .status(404)
+        .json({ error: "not_found", message: "Recording not found" });
+    }
+    if (err?.status === 409 || err?.status === 423) {
+      return res.status(202).json({ status: "processing" });
+    }
+    console.error("Recording media fetch error:", err);
+    res.status(500).json({
+      error: "recording_media_failed",
+      message,
+    });
+  }
+});
+
 // Recording status callback endpoint
 app.post("/api/recording/status", (req, res) => {
   console.log("Recording status callback:", req.body);
