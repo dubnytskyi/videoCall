@@ -390,6 +390,40 @@ app.post("/api/room/:roomSid/end", async (req, res) => {
   }
 });
 
+// Disconnect all participants except the provided identity
+app.post("/api/room/:roomSid/kick-others", async (req, res) => {
+  try {
+    const { roomSid } = req.params;
+    const { keepIdentity } = req.body || {};
+    if (!keepIdentity) {
+      return res.status(400).json({ error: "keepIdentity_required" });
+    }
+
+    // List participants via REST (participants API is limited; we use Participants list)
+    const participants = await (twilioClient as any).video
+      .rooms(roomSid)
+      .participants
+      .list({ status: "connected", limit: 50 });
+
+    const toDisconnect = participants.filter((p: any) => p.identity !== keepIdentity);
+    for (const p of toDisconnect) {
+      try {
+        await (twilioClient as any).video
+          .rooms(roomSid)
+          .participants(p.sid)
+          .update({ status: "disconnected" });
+      } catch (e) {
+        console.warn(`Failed to disconnect participant ${p.identity} (${p.sid})`, e);
+      }
+    }
+
+    res.json({ success: true, disconnected: toDisconnect.map((p: any) => p.identity) });
+  } catch (err) {
+    console.error("Kick-others error:", err);
+    res.status(500).json({ error: "kick_failed", message: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
 // Update recording rules for a room
 app.post("/api/room/:roomSid/recording-rules", async (req, res) => {
   try {
