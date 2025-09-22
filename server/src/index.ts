@@ -159,7 +159,8 @@ app.post("/api/recording/start", async (req, res) => {
       audioSources: ["*"],
       videoLayout: {
         grid: {
-          video_sources: ["pdf-canvas", "camera", "*"],
+          // Use all available recorded video sources to avoid layout-related stalls
+          video_sources: ["*"],
         },
       },
       format: "mp4",
