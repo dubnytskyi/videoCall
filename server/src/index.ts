@@ -153,8 +153,8 @@ app.post("/api/recording/start", async (req, res) => {
       );
     }
 
-    // Create composition for recording using the correct API
-    const composition = await twilioClient.video.compositions.create({
+    // Create composition for recording using the supported API
+    const composition = await (twilioClient as any).video.compositions.create({
       roomSid: roomSid,
       audioSources: ["*"],
       videoLayout: {
@@ -196,7 +196,7 @@ app.post("/api/recording/stop", async (req, res) => {
     console.log(`Stopping recording: ${recordingSid}`);
 
     // Fetch the composition first
-    let composition = await twilioClient.video
+    let composition = await (twilioClient as any).video
       .compositions(recordingSid)
       .fetch();
 
@@ -223,7 +223,9 @@ app.post("/api/recording/stop", async (req, res) => {
     const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      composition = await twilioClient.video.compositions(recordingSid).fetch();
+      composition = await (twilioClient as any).video
+        .compositions(recordingSid)
+        .fetch();
 
       const normalizedStatus =
         composition.status === "completed"
