@@ -157,26 +157,10 @@ app.post("/api/recording/start", async (req, res) => {
     const composition = await twilioClient.video.compositions.create({
       roomSid: roomSid,
       audioSources: ["*"],
-      resolution: "1280x720",
       videoLayout: {
-        custom: {
+        grid: {
           video_sources: ["pdf-canvas", "*"],
-          left: {
-            x_pos: 0,
-            y_pos: 0,
-            width: 640,
-            height: 720,
-            video_sources: ["*"],
-            video_sources_excluded: ["pdf-canvas"],
-          },
-          right: {
-            x_pos: 640,
-            y_pos: 0,
-            width: 640,
-            height: 720,
-            video_sources: ["pdf-canvas"],
-          },
-        } as any,
+        },
       },
       format: "mp4",
       statusCallback: `${
