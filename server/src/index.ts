@@ -7,6 +7,12 @@ dotenv.config();
 
 const app = express();
 app.use(express.json());
+
+// Initialize Twilio client for recording
+const twilioClient = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
 app.use(
   cors({
     origin: [
@@ -113,6 +119,175 @@ app.post("/api/token", async (req, res) => {
       message: err instanceof Error ? err.message : "Unknown error",
     });
   }
+});
+
+// Start recording endpoint
+app.post("/api/recording/start", async (req, res) => {
+  try {
+    const { roomSid } = req.body;
+
+    if (!roomSid) {
+      return res.status(400).json({ error: "roomSid is required" });
+    }
+
+    console.log(`Starting recording for room: ${roomSid}`);
+
+    // First, get the room to ensure it exists
+    const room = await twilioClient.video.rooms(roomSid).fetch();
+
+    // Create composition for recording using the correct API
+    const composition = await twilioClient.video.compositions.create({
+      roomSid: roomSid,
+      audioSources: ["*"],
+      videoLayout: {
+        grid: {
+          video_sources: ["*"],
+        },
+      },
+      format: "mp4",
+      statusCallback: `${
+        process.env.SERVER_URL || "http://localhost:4000"
+      }/api/recording/status`,
+    });
+
+    console.log(`Recording started: ${composition.sid}`);
+
+    res.json({
+      recordingSid: composition.sid,
+      status: composition.status,
+      roomSid: composition.roomSid,
+    });
+  } catch (err) {
+    console.error("Recording start error:", err);
+    res.status(500).json({
+      error: "recording_start_failed",
+      message: err instanceof Error ? err.message : "Unknown error",
+    });
+  }
+});
+
+// Stop recording endpoint
+app.post("/api/recording/stop", async (req, res) => {
+  try {
+    const { recordingSid } = req.body;
+
+    if (!recordingSid) {
+      return res.status(400).json({ error: "recordingSid is required" });
+    }
+
+    console.log(`Stopping recording: ${recordingSid}`);
+
+    // Fetch the composition first
+    let composition = await twilioClient.video
+      .compositions(recordingSid)
+      .fetch();
+
+    // Try to end the room to finalize the composition
+    const roomSid = composition.roomSid;
+    if (roomSid) {
+      try {
+        console.log(`Attempting to complete room: ${roomSid}`);
+        await twilioClient.video
+          .rooms(roomSid)
+          .update({ status: "completed" as any });
+      } catch (e) {
+        console.warn(`Could not complete room ${roomSid}:`, e);
+      }
+    }
+
+    // Poll composition until it's completed or timeout
+    const maxAttempts = 15; // ~30s total
+    const delayMs = 2000;
+    const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      composition = await twilioClient.video.compositions(recordingSid).fetch();
+
+      const normalizedStatus =
+        composition.status === "completed"
+          ? "completed"
+          : composition.status === "failed"
+          ? "failed"
+          : "in-progress";
+
+      // Some SDK versions expose downloadable URL as `url`; otherwise it may be missing until ready
+      if (normalizedStatus === "completed" && (composition as any).url) {
+        return res.json({
+          recordingSid: composition.sid,
+          status: normalizedStatus,
+          duration: composition.duration,
+          size: composition.size,
+          url: (composition as any).url,
+          roomSid: composition.roomSid,
+        });
+      }
+
+      if (normalizedStatus === "failed") {
+        return res.json({
+          recordingSid: composition.sid,
+          status: normalizedStatus,
+          roomSid: composition.roomSid,
+        });
+      }
+
+      await delay(delayMs);
+    }
+
+    // Timed out waiting for URL, return latest status
+    const normalizedStatus =
+      composition.status === "completed"
+        ? "completed"
+        : composition.status === "failed"
+        ? "failed"
+        : "in-progress";
+
+    res.json({
+      recordingSid: composition.sid,
+      status: normalizedStatus,
+      duration: composition.duration,
+      size: composition.size,
+      url: (composition as any).url,
+      roomSid: composition.roomSid,
+    });
+  } catch (err) {
+    console.error("Recording stop error:", err);
+    res.status(500).json({
+      error: "recording_stop_failed",
+      message: err instanceof Error ? err.message : "Unknown error",
+    });
+  }
+});
+
+// Get recording status endpoint
+app.get("/api/recording/:recordingSid", async (req, res) => {
+  try {
+    const { recordingSid } = req.params;
+
+    const composition = await twilioClient.video
+      .compositions(recordingSid)
+      .fetch();
+
+    res.json({
+      recordingSid: composition.sid,
+      status: composition.status,
+      duration: composition.duration,
+      size: composition.size,
+      url: composition.url,
+      roomSid: composition.roomSid,
+    });
+  } catch (err) {
+    console.error("Recording fetch error:", err);
+    res.status(500).json({
+      error: "recording_fetch_failed",
+      message: err instanceof Error ? err.message : "Unknown error",
+    });
+  }
+});
+
+// Recording status callback endpoint
+app.post("/api/recording/status", (req, res) => {
+  console.log("Recording status callback:", req.body);
+  res.status(200).send("OK");
 });
 
 // Health check endpoint
