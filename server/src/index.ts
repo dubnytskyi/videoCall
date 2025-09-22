@@ -158,9 +158,23 @@ app.post("/api/recording/start", async (req, res) => {
       roomSid: roomSid,
       audioSources: ["*"],
       videoLayout: {
-        grid: {
-          // Prefer the PDF canvas track if present, then include everything else
-          video_sources: ["pdf-canvas", "screen", "*"] as any,
+        pdf: {
+          x_pos: 0.5,
+          y_pos: 0,
+          width: 0.5,
+          height: 1,
+          video_sources: ["pdf-canvas"] as any,
+          z_pos: 1,
+        },
+        people: {
+          x_pos: 0,
+          y_pos: 0,
+          width: 0.5,
+          height: 1,
+          max_rows: 2,
+          max_columns: 1,
+          video_sources: ["camera"] as any,
+          z_pos: 1,
         },
       },
       format: "mp4",
