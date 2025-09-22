@@ -316,6 +316,28 @@ app.get("/api/recording/:recordingSid/media", async (req, res) => {
   }
 });
 
+// End room endpoint
+app.post("/api/room/:roomSid/end", async (req, res) => {
+  try {
+    const { roomSid } = req.params;
+
+    console.log(`Ending room: ${roomSid}`);
+
+    // Update room status to completed
+    await twilioClient.video
+      .rooms(roomSid)
+      .update({ status: "completed" as any });
+
+    res.json({ success: true, message: "Room ended successfully" });
+  } catch (err) {
+    console.error("Room end error:", err);
+    res.status(500).json({
+      error: "room_end_failed",
+      message: err instanceof Error ? err.message : "Unknown error",
+    });
+  }
+});
+
 // Recording status callback endpoint
 app.post("/api/recording/status", (req, res) => {
   console.log("Recording status callback:", req.body);
