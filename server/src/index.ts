@@ -159,13 +159,11 @@ app.post("/api/recording/start", async (req, res) => {
       audioSources: ["*"],
       videoLayout: {
         grid: {
-          // Use all available recorded video sources to avoid layout-related stalls
-          video_sources: ["*"],
+          // Prefer the PDF canvas track if present, then include everything else
+          video_sources: ["pdf-canvas", "screen", "*"] as any,
         },
       },
       format: "mp4",
-      // Use 1280x720 to satisfy Twilio limits and maintain clarity
-      resolution: "1280x720",
       statusCallback: `${
         process.env.SERVER_URL || "http://localhost:4000"
       }/api/recording/status`,
@@ -388,93 +386,6 @@ app.post("/api/room/:roomSid/end", async (req, res) => {
     console.error("Room end error:", err);
     res.status(500).json({
       error: "room_end_failed",
-      message: err instanceof Error ? err.message : "Unknown error",
-    });
-  }
-});
-
-// Wait for recording completion endpoint
-app.post("/api/recording/:recordingSid/wait-completion", async (req, res) => {
-  try {
-    const { recordingSid } = req.params;
-    const { timeout = 60000 } = req.body; // Default 1 minute timeout
-
-    console.log(
-      `Waiting for recording completion: ${recordingSid}, timeout: ${timeout}ms`
-    );
-
-    const startTime = Date.now();
-    const maxWaitTime = timeout;
-    const pollInterval = 3000; // Poll every 3 seconds
-
-    let lastStatus = "";
-    let pollCount = 0;
-
-    while (Date.now() - startTime < maxWaitTime) {
-      try {
-        const composition = await twilioClient.video
-          .compositions(recordingSid)
-          .fetch();
-
-        pollCount++;
-        const elapsed = Math.round((Date.now() - startTime) / 1000);
-
-        // Log status changes or every 10th poll
-        if (composition.status !== lastStatus || pollCount % 10 === 0) {
-          console.log(
-            `Recording status: ${composition.status} (poll #${pollCount}, ${elapsed}s elapsed)`
-          );
-          lastStatus = composition.status;
-        }
-
-        if (composition.status === "completed") {
-          console.log(
-            `Recording completed after ${elapsed}s and ${pollCount} polls`
-          );
-          return res.json({
-            success: true,
-            status: composition.status,
-            duration: composition.duration,
-            size: composition.size,
-            url: composition.url,
-            roomSid: composition.roomSid,
-          });
-        }
-
-        if (composition.status === "failed") {
-          console.log(`Recording failed after ${elapsed}s`);
-          return res.status(500).json({
-            error: "recording_failed",
-            message: "Recording failed to complete",
-            status: composition.status,
-          });
-        }
-
-        // Wait before next poll
-        await new Promise((resolve) => setTimeout(resolve, pollInterval));
-      } catch (err) {
-        console.error(
-          `Error polling recording status (poll #${pollCount}):`,
-          err
-        );
-        // Continue polling on transient errors
-        await new Promise((resolve) => setTimeout(resolve, pollInterval));
-      }
-    }
-
-    // Timeout reached
-    const elapsed = Math.round((Date.now() - startTime) / 1000);
-    console.log(`Recording timeout after ${elapsed}s and ${pollCount} polls`);
-    res.status(408).json({
-      error: "timeout",
-      message: `Recording completion timeout after ${elapsed}s`,
-      recordingSid: recordingSid,
-      polls: pollCount,
-    });
-  } catch (err) {
-    console.error("Recording wait error:", err);
-    res.status(500).json({
-      error: "recording_wait_failed",
       message: err instanceof Error ? err.message : "Unknown error",
     });
   }
