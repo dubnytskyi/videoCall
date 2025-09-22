@@ -159,7 +159,8 @@ app.post("/api/recording/start", async (req, res) => {
       audioSources: ["*"],
       videoLayout: {
         grid: {
-          video_sources: ["*"],
+          // Prefer the PDF canvas track if present, then include everything else
+          video_sources: ["pdf-canvas", "screen", "*"] as any,
         },
       },
       format: "mp4",
@@ -427,12 +428,10 @@ app.post("/api/room/:roomSid/kick-others", async (req, res) => {
     });
   } catch (err) {
     console.error("Kick-others error:", err);
-    res
-      .status(500)
-      .json({
-        error: "kick_failed",
-        message: err instanceof Error ? err.message : "Unknown error",
-      });
+    res.status(500).json({
+      error: "kick_failed",
+      message: err instanceof Error ? err.message : "Unknown error",
+    });
   }
 });
 
