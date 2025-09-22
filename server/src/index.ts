@@ -161,7 +161,7 @@ app.post("/api/recording/start", async (req, res) => {
       videoLayout: {
         custom: {
           video_sources: ["*", "pdf-canvas"], // Required top-level array
-          video_calls: {
+          left_side: {
             z_pos: 1,
             x_pos: 0,
             y_pos: 0,
@@ -170,7 +170,7 @@ app.post("/api/recording/start", async (req, res) => {
             video_sources: ["*"],
             video_sources_excluded: ["pdf-canvas"],
           },
-          pdf_document: {
+          right_side: {
             z_pos: 2,
             x_pos: 640,
             y_pos: 0,
