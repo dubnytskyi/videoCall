@@ -159,25 +159,8 @@ app.post("/api/recording/start", async (req, res) => {
       audioSources: ["*"],
       resolution: "1280x720",
       videoLayout: {
-        custom: {
+        grid: {
           video_sources: ["*", "pdf-canvas"],
-          left_side: {
-            z_pos: 1,
-            x_pos: 0,
-            y_pos: 0,
-            width: 640,
-            height: 720,
-            video_sources: ["*"],
-            video_sources_excluded: ["pdf-canvas"],
-          },
-          right_side: {
-            z_pos: 2,
-            x_pos: 640,
-            y_pos: 0,
-            width: 640,
-            height: 720,
-            video_sources: ["pdf-canvas"],
-          },
         },
       },
       format: "mp4",
