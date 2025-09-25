@@ -153,42 +153,29 @@ app.post("/api/recording/start", async (req, res) => {
       );
     }
 
-    // Create composition for recording with custom left/right layout
-    // Left: two stacked tiles for participants (exclude pdf-canvas)
-    // Right: pdf-canvas fills entire right half
+    // Create composition for recording with custom layout
+    // Left half: participants, Right half: PDF document
     const composition = await (twilioClient as any).video.compositions.create({
       roomSid: roomSid,
       audioSources: ["*"],
       resolution: "1280x720",
       videoLayout: {
         custom: {
-          // Top-level list of all possible sources referenced in regions
           video_sources: ["*", "pdf-canvas"],
 
-          // Left top tile (participant 1)
-          left_top: {
+          // Left half: participants (notary + client)
+          participants: {
             z_pos: 1,
             x_pos: 0,
             y_pos: 0,
             width: 640,
-            height: 360,
+            height: 720,
             video_sources: ["*"],
             video_sources_excluded: ["pdf-canvas"],
           },
 
-          // Left bottom tile (participant 2)
-          left_bottom: {
-            z_pos: 1,
-            x_pos: 0,
-            y_pos: 360,
-            width: 640,
-            height: 360,
-            video_sources: ["*"],
-            video_sources_excluded: ["pdf-canvas"],
-          },
-
-          // Right half dedicated to the PDF canvas
-          right_full: {
+          // Right half: PDF document
+          document: {
             z_pos: 2,
             x_pos: 640,
             y_pos: 0,
