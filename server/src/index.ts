@@ -163,8 +163,8 @@ app.post("/api/recording/start", async (req, res) => {
         custom: {
           video_sources: ["*", "pdf-canvas"],
 
-          // Left half: participants (notary + client)
-          participants: {
+          // Left half: participants (notary + client) - exclude pdf-canvas
+          left_participants: {
             z_pos: 1,
             x_pos: 0,
             y_pos: 0,
@@ -174,8 +174,8 @@ app.post("/api/recording/start", async (req, res) => {
             video_sources_excluded: ["pdf-canvas"],
           },
 
-          // Right half: PDF document
-          document: {
+          // Right half: PDF document only
+          right_document: {
             z_pos: 2,
             x_pos: 640,
             y_pos: 0,
