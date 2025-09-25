@@ -153,36 +153,15 @@ app.post("/api/recording/start", async (req, res) => {
       );
     }
 
-    // Create composition for recording with custom layout
-    // Left half: participants, Right half: PDF document
+    // Create composition for recording with screen capture
+    // Now we have one screen track that contains everything
     const composition = await (twilioClient as any).video.compositions.create({
       roomSid: roomSid,
       audioSources: ["*"],
       resolution: "1280x720",
       videoLayout: {
-        custom: {
-          video_sources: ["*", "pdf-canvas"],
-
-          // Left half: participants (notary + client) - exclude pdf-canvas
-          left_participants: {
-            z_pos: 1,
-            x_pos: 0,
-            y_pos: 0,
-            width: 640,
-            height: 720,
-            video_sources: ["*"],
-            video_sources_excluded: ["pdf-canvas"],
-          },
-
-          // Right half: PDF document only
-          right_document: {
-            z_pos: 2,
-            x_pos: 640,
-            y_pos: 0,
-            width: 640,
-            height: 720,
-            video_sources: ["pdf-canvas"],
-          },
+        grid: {
+          video_sources: ["*"], // Only the screen track
         },
       },
       format: "mp4",
