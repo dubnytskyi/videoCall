@@ -140,12 +140,17 @@ app.post("/api/recording/start", async (req, res) => {
       status: room.status,
     });
 
-    // Enable recording for all participants via Recording Rules (requires Group/Group Small room)
+    // Enable recording for screen capture only via Recording Rules (requires Group/Group Small room)
     try {
       await (twilioClient as any).video
         .rooms(roomSid)
-        .recordingRules.update({ rules: [{ type: "include", all: true }] });
-      console.log(`Recording rules enabled (include all) for room ${roomSid}`);
+        .recordingRules.update({
+          rules: [
+            { type: "exclude", all: true }, // Exclude all tracks by default
+            { type: "include", kind: "video", name: "pdf-canvas" } // Include only screen capture
+          ],
+        });
+      console.log(`Recording rules enabled (screen capture only) for room ${roomSid}`);
     } catch (e) {
       console.warn(
         `Could not enable recording rules for room ${roomSid}. Ensure room type is Group/Group Small.`,
@@ -153,15 +158,15 @@ app.post("/api/recording/start", async (req, res) => {
       );
     }
 
-    // Create composition for recording with screen capture
-    // Now we have one screen track that contains everything
+    // Create composition for recording with screen capture only
+    // We only want to record the screen share track, not individual video tracks
     const composition = await (twilioClient as any).video.compositions.create({
       roomSid: roomSid,
-      audioSources: ["*"],
+      audioSources: ["*"], // Include all audio
       resolution: "1280x720",
       videoLayout: {
         grid: {
-          video_sources: ["*"], // Only the screen track
+          video_sources: ["pdf-canvas"], // Only the screen capture track
         },
       },
       format: "mp4",
