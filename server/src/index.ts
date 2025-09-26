@@ -142,15 +142,15 @@ app.post("/api/recording/start", async (req, res) => {
 
     // Enable recording for screen capture only via Recording Rules (requires Group/Group Small room)
     try {
-      await (twilioClient as any).video
-        .rooms(roomSid)
-        .recordingRules.update({
-          rules: [
-            { type: "exclude", all: true }, // Exclude all tracks by default
-            { type: "include", kind: "video", name: "pdf-canvas" } // Include only screen capture
-          ],
-        });
-      console.log(`Recording rules enabled (screen capture only) for room ${roomSid}`);
+      await (twilioClient as any).video.rooms(roomSid).recordingRules.update({
+        rules: [
+          { type: "exclude", all: true }, // Exclude all tracks by default
+          { type: "include", kind: "video", name: "pdf-canvas" }, // Include only screen capture
+        ],
+      });
+      console.log(
+        `Recording rules enabled (screen capture only) for room ${roomSid}`
+      );
     } catch (e) {
       console.warn(
         `Could not enable recording rules for room ${roomSid}. Ensure room type is Group/Group Small.`,
