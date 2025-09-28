@@ -85,7 +85,13 @@ app.post("/api/token", async (req, res) => {
       room,
     });
 
+    // Add room configuration grant to create Group room (required for Recording Rules)
+    const roomConfigGrant = new VideoGrant({
+      roomConfigurationProfiles: ['group-rooms'],
+    });
+
     token.addGrant(videoGrant);
+    token.addGrant(roomConfigGrant);
 
     const jwtToken = token.toJwt();
     console.log(`Token generated successfully for ${identity}`);
@@ -151,11 +157,15 @@ app.post("/api/recording/start", async (req, res) => {
       console.log(
         `Recording rules enabled (screen capture only) for room ${roomSid}`
       );
-    } catch (e) {
+    } catch (e: any) {
       console.warn(
-        `Could not enable recording rules for room ${roomSid}. Ensure room type is Group/Group Small.`,
-        e
+        `Could not enable recording rules for room ${roomSid}. Room type: ${room.type || 'unknown'}`,
+        e?.message || e
       );
+      
+      // If recording rules fail, we'll still try to create composition
+      // but it might not work as expected
+      console.warn('Continuing with composition creation despite recording rules failure...');
     }
 
     // Create composition for recording with screen capture only
