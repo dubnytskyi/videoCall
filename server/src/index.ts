@@ -594,29 +594,25 @@ wss.on("connection", (ws, req) => {
     console.log(`Created new document for room: ${roomName}`);
   }
 
+  // Send initial document state
+  const state = Y.encodeStateAsUpdate(doc);
+  ws.send(state);
+
   // Handle incoming messages
   ws.on("message", (message) => {
     try {
-      const data = JSON.parse(message.toString());
+      // Yjs sends binary data
+      const update = new Uint8Array(message as Buffer);
 
-      if (data.type === "sync") {
-        // Handle Yjs sync protocol
-        const update = Buffer.from(data.update, "base64");
-        Y.applyUpdate(doc!, update);
+      // Apply update to the document
+      Y.applyUpdate(doc!, update);
 
-        // Broadcast to other clients in the same room
-        const encodedUpdate = Buffer.from(update).toString("base64");
-        const response = JSON.stringify({
-          type: "sync",
-          update: encodedUpdate,
-        });
-
-        wss.clients.forEach((client) => {
-          if (client !== ws && client.readyState === 1) {
-            client.send(response);
-          }
-        });
-      }
+      // Broadcast to other clients in the same room
+      wss.clients.forEach((client) => {
+        if (client !== ws && client.readyState === 1) {
+          client.send(update);
+        }
+      });
     } catch (error) {
       console.error("Error handling WebSocket message:", error);
     }
