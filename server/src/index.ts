@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import twilio from "twilio";
 import dotenv from "dotenv";
+import { WebSocketServer } from "ws";
+import * as Y from "yjs";
 
 dotenv.config();
 
@@ -85,13 +87,7 @@ app.post("/api/token", async (req, res) => {
       room,
     });
 
-    // Add room configuration grant to create Group room (required for Recording Rules)
-    const roomConfigGrant = new VideoGrant({
-      roomConfigurationProfiles: ['group-rooms'],
-    });
-
     token.addGrant(videoGrant);
-    token.addGrant(roomConfigGrant);
 
     const jwtToken = token.toJwt();
     console.log(`Token generated successfully for ${identity}`);
@@ -146,37 +142,27 @@ app.post("/api/recording/start", async (req, res) => {
       status: room.status,
     });
 
-    // Enable recording for screen capture only via Recording Rules (requires Group/Group Small room)
+    // Enable recording for all participants via Recording Rules (requires Group/Group Small room)
     try {
-      await (twilioClient as any).video.rooms(roomSid).recordingRules.update({
-        rules: [
-          { type: "exclude", all: true }, // Exclude all tracks by default
-          { type: "include", kind: "video", name: "pdf-canvas" }, // Include only screen capture
-        ],
-      });
-      console.log(
-        `Recording rules enabled (screen capture only) for room ${roomSid}`
-      );
-    } catch (e: any) {
+      await (twilioClient as any).video
+        .rooms(roomSid)
+        .recordingRules.update({ rules: [{ type: "include", all: true }] });
+      console.log(`Recording rules enabled (include all) for room ${roomSid}`);
+    } catch (e) {
       console.warn(
-        `Could not enable recording rules for room ${roomSid}. Room type: ${room.type || 'unknown'}`,
-        e?.message || e
+        `Could not enable recording rules for room ${roomSid}. Ensure room type is Group/Group Small.`,
+        e
       );
-      
-      // If recording rules fail, we'll still try to create composition
-      // but it might not work as expected
-      console.warn('Continuing with composition creation despite recording rules failure...');
     }
 
-    // Create composition for recording with screen capture only
-    // We only want to record the screen share track, not individual video tracks
+    // Create composition to record only the full screen track
     const composition = await (twilioClient as any).video.compositions.create({
       roomSid: roomSid,
-      audioSources: ["*"], // Include all audio
+      audioSources: ["*"],
       resolution: "1280x720",
       videoLayout: {
         grid: {
-          video_sources: ["pdf-canvas"], // Only the screen capture track
+          video_sources: ["screen-full"],
         },
       },
       format: "mp4",
@@ -532,14 +518,117 @@ app.post("/api/recording/status", (req, res) => {
   res.status(200).send("OK");
 });
 
+// PDF Template endpoint
+app.post("/api/pdf-template", async (req, res) => {
+  try {
+    const templateData = req.body;
+
+    if (!templateData || !templateData.template) {
+      return res.status(400).json({ error: "template data is required" });
+    }
+
+    console.log("Received PDF template:", {
+      name: templateData.template.name,
+      fieldsCount: templateData.template.fields?.length || 0,
+      submittersCount: templateData.template.submitters?.length || 0,
+    });
+
+    // Here you would typically save to a database
+    // For now, we'll just log and return success
+    // In a real implementation, you might use:
+    // - PostgreSQL with jsonb column
+    // - MongoDB
+    // - File system storage
+
+    // Example database save (commented out):
+    // await db.collection('pdf_templates').insertOne({
+    //   ...templateData,
+    //   createdAt: new Date(),
+    //   createdBy: req.headers['user-agent'] || 'unknown'
+    // });
+
+    res.json({
+      success: true,
+      message: "Template saved successfully",
+      templateId: `template_${Date.now()}`, // In real app, return actual DB ID
+    });
+  } catch (err) {
+    console.error("PDF template save error:", err);
+    res.status(500).json({
+      error: "template_save_failed",
+      message: err instanceof Error ? err.message : "Unknown error",
+    });
+  }
+});
+
 // Health check endpoint
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
 const port = parseInt(process.env.PORT || "4000", 10);
-app.listen(port, "0.0.0.0", () => {
+const server = app.listen(port, "0.0.0.0", () => {
   console.log(`Token server running on http://0.0.0.0:${port}`);
   console.log(`Health check: http://localhost:${port}/api/health`);
   console.log(`Network access: http://192.168.0.150:${port}/api/health`);
 });
+
+// WebSocket server for Yjs collaboration
+const wss = new WebSocketServer({ port: 1234 });
+
+// Store documents by room name
+const docs = new Map<string, Y.Doc>();
+
+wss.on("connection", (ws, req) => {
+  console.log("WebSocket connection established");
+
+  // Extract room name from URL
+  const url = new URL(req.url!, `http://${req.headers.host}`);
+  const roomName = url.searchParams.get("room") || "default";
+
+  // Get or create document for this room
+  let doc = docs.get(roomName);
+  if (!doc) {
+    doc = new Y.Doc();
+    docs.set(roomName, doc);
+    console.log(`Created new document for room: ${roomName}`);
+  }
+
+  // Handle incoming messages
+  ws.on("message", (message) => {
+    try {
+      const data = JSON.parse(message.toString());
+
+      if (data.type === "sync") {
+        // Handle Yjs sync protocol
+        const update = Buffer.from(data.update, "base64");
+        Y.applyUpdate(doc!, update);
+
+        // Broadcast to other clients in the same room
+        const encodedUpdate = Buffer.from(update).toString("base64");
+        const response = JSON.stringify({
+          type: "sync",
+          update: encodedUpdate,
+        });
+
+        wss.clients.forEach((client) => {
+          if (client !== ws && client.readyState === 1) {
+            client.send(response);
+          }
+        });
+      }
+    } catch (error) {
+      console.error("Error handling WebSocket message:", error);
+    }
+  });
+
+  ws.on("close", () => {
+    console.log("WebSocket connection closed");
+  });
+
+  ws.on("error", (error) => {
+    console.error("WebSocket error:", error);
+  });
+});
+
+console.log(`WebSocket server running on ws://localhost:1234`);
