@@ -567,6 +567,7 @@ app.get("/api/health", (req, res) => {
 });
 
 const port = parseInt(process.env.PORT || "4000", 10);
+const wsPort = parseInt(process.env.WS_PORT || "1234", 10);
 const server = app.listen(port, "0.0.0.0", () => {
   console.log(`Token server running on http://0.0.0.0:${port}`);
   console.log(`Health check: http://localhost:${port}/api/health`);
@@ -574,7 +575,7 @@ const server = app.listen(port, "0.0.0.0", () => {
 });
 
 // WebSocket server for Yjs collaboration
-const wss = new WebSocketServer({ port: 1234 });
+const wss = new WebSocketServer({ port: wsPort });
 
 // Store documents by room name
 const docs = new Map<string, Y.Doc>();
@@ -627,4 +628,4 @@ wss.on("connection", (ws, req) => {
   });
 });
 
-console.log(`WebSocket server running on ws://localhost:1234`);
+console.log(`WebSocket server running on ws://localhost:${wsPort}`);
