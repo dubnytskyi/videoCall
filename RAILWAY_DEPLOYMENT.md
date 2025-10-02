@@ -21,9 +21,9 @@ NODE_ENV=production
 ```
 
 ### 3. Деплой
-1. Railway автоматично виявить кореневий `package.json`
-2. Запустить `npm install` (встановить залежності для всього проекту)
-3. Запустить `npm run build:server` (збере сервер)
+1. Railway використовує `nixpacks.toml` для конфігурації
+2. Запустить `yarn install` (встановить залежності для всього проекту)
+3. Запустить `yarn run build` (збере сервер - тепер це `npm run build:server`)
 4. Запустить `npm start` (запустить сервер з папки `server/`)
 
 ### 4. Отримання URL
