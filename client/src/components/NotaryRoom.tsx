@@ -1,17 +1,17 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import VideoRoom from "./VideoRoom";
-import PdfCollaborator from "./PdfCollaborator";
+import PdfFieldCollaborator from "./PdfFieldCollaborator";
+import TabCapture from "./TabCapture";
+import { YjsProvider } from "../contexts/YjsContext";
 import { fetchTwilioToken } from "../lib/twilioToken";
-import { CollabOp, Participant } from "../types/collab";
-import { LocalDataTrack } from "twilio-video";
+import { Participant } from "../types/collab";
 import { RecordingStatus } from "../lib/recordingService";
 import { getServerUrl } from "../config";
 
 export default function NotaryRoom() {
   const navigate = useNavigate();
   const [token, setToken] = useState<string | null>(null);
-  const [localDataTrack, setLocalDataTrack] = useState<LocalDataTrack | null>(null);
   const [participantInfo, setParticipantInfo] = useState({
     notary: { identity: "Notary", isConnected: true, isReady: true },
     client: { identity: "Waiting...", isConnected: false, isReady: false }
@@ -19,23 +19,30 @@ export default function NotaryRoom() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
   const [isEndingCall, setIsEndingCall] = useState(false);
   const [isFinalizingRecording, setIsFinalizingRecording] = useState(false);
   
-  // Canvas capture to video track for recording
-  const compositeCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const canvasStreamRef = useRef<MediaStream | null>(null);
-  const canvasTrackRef = useRef<MediaStreamTrack | null>(null);
+  // Tab capture tracks
+  const regionTrackRef = useRef<MediaStreamTrack | null>(null);
+  const fullTrackRef = useRef<MediaStreamTrack | null>(null);
+  const tabApiRef = useRef<{ start: () => Promise<void>; stop: () => void } | null>(null);
 
   // Stable identity that doesn't change on re-renders
   const identityRef = useRef<string | null>(null);
+  const location = useLocation();
+  const yjsRoomId = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('room') || 'test-room';
+  }, [location.search]);
   
-  // Initialize identity only once
+  // Initialize identity and room ID only once
   useEffect(() => {
     if (!identityRef.current) {
       identityRef.current = `notary-${Math.random().toString(36).substr(2, 9)}`;
       console.log(`[NotaryRoom] Created identity: ${identityRef.current}`);
     }
+    console.log(`[NotaryRoom] Using Yjs room ID: ${yjsRoomId}`);
   }, []);
 
   useEffect(() => {
@@ -61,17 +68,6 @@ export default function NotaryRoom() {
     getToken();
   }, []);
 
-  const handleLocalDataTrack = useCallback((track: LocalDataTrack) => {
-    console.log(`[NotaryRoom] Received LocalDataTrack:`, track);
-    console.log(`[NotaryRoom] Setting localDataTrack state to:`, !!track);
-    setLocalDataTrack(track);
-  }, []);
-
-  const handleRemoteData = useCallback((data: CollabOp) => {
-    // Notary receives data from client (if any)
-    console.log("Notary received data from client:", data);
-  }, []);
-
   const handleParticipantUpdate = useCallback((participant: Participant) => {
     setParticipantInfo(prev => ({
       ...prev,
@@ -81,7 +77,15 @@ export default function NotaryRoom() {
 
   const handleRecordingStatusChange = useCallback((status: RecordingStatus | null) => {
     console.log(`[NotaryRoom] Recording status change:`, status);
+    console.log(`[NotaryRoom] Recording status:`, status?.status);
     setRecordingStatus(status);
+    setIsRecording(status?.status === 'enqueued' || status?.status === 'in-progress');
+  }, []);
+
+  const handleTabTracks = useCallback((regionTrack: MediaStreamTrack | null, fullTrack: MediaStreamTrack | null) => {
+    console.log(`[NotaryRoom] Tab tracks change:`, { region: !!regionTrack, full: !!fullTrack });
+    regionTrackRef.current = regionTrack;
+    fullTrackRef.current = fullTrack;
   }, []);
 
   const endCall = useCallback(async () => {
@@ -185,11 +189,19 @@ export default function NotaryRoom() {
           token={token}
           identity={identityRef.current || `notary-${Math.random().toString(36).substr(2, 9)}`}
           role="notary"
-          onLocalDataTrack={handleLocalDataTrack}
-          onRemoteData={handleRemoteData}
+          onLocalDataTrack={() => {}}
+          onRemoteData={() => {}}
           onParticipantUpdate={handleParticipantUpdate}
           onRecordingStatusChange={handleRecordingStatusChange}
-          canvasTrack={canvasTrackRef.current}
+          canvasTrack={regionTrackRef.current}
+          screenFullTrack={fullTrackRef.current as any}
+          onCaptureToggle={async (active) => {
+            setIsRecording(active);
+            if (active && tabApiRef.current) {
+              // Start capture synchronously on user gesture
+              try { await tabApiRef.current.start(); } catch {}
+            }
+          }}
         />
         
         <div className="mt-4 p-3 bg-white rounded-lg shadow">
@@ -265,116 +277,19 @@ export default function NotaryRoom() {
 
       {/* Right Panel - PDF Document */}
       <div className="flex-1 p-4">
-        {localDataTrack ? (
-          <PdfCollaborator
-            localDataTrack={localDataTrack}
-            onRemoteData={handleRemoteData}
-            isNotary={true}
-            participantInfo={participantInfo}
-            onCanvasRef={(canvas) => {
-              console.log('[NotaryRoom] Canvas ref changed:', !!canvas, canvas?.width, canvas?.height);
-              console.log('[NotaryRoom] Canvas element:', canvas);
-              compositeCanvasRef.current = canvas;
-              
-              const tryCaptureCanvas = () => {
-                try {
-                  if (canvas && !canvasTrackRef.current) {
-                    console.log('[NotaryRoom] Creating canvas stream from canvas:', canvas.width, 'x', canvas.height);
-                    
-                    // Check if canvas has valid dimensions
-                    if (canvas.width === 0 || canvas.height === 0) {
-                      console.warn('[NotaryRoom] Canvas has zero dimensions, waiting...');
-                      return;
-                    }
-                    
-                    // Try different approaches to capture canvas
-                    let stream: MediaStream | null = null;
-                    
-                    // Method 1: captureStream with high frame rate for smooth recording
-                    if ((canvas as any).captureStream) {
-                      try {
-                        stream = (canvas as any).captureStream(30); // Higher frame rate for smoother recording
-                        console.log('[NotaryRoom] captureStream(30) method succeeded');
-                      } catch (e) {
-                        console.warn('[NotaryRoom] captureStream(30) failed:', e);
-                      }
-                    }
-                    
-                    // Method 2: captureStream with 60fps for maximum quality
-                    if (!stream && (canvas as any).captureStream) {
-                      try {
-                        stream = (canvas as any).captureStream(60);
-                        console.log('[NotaryRoom] captureStream(60) method succeeded');
-                      } catch (e) {
-                        console.warn('[NotaryRoom] captureStream(60) failed:', e);
-                      }
-                    }
-                    
-                    // Method 3: Try without frame rate parameter (browser default)
-                    if (!stream && (canvas as any).captureStream) {
-                      try {
-                        stream = (canvas as any).captureStream();
-                        console.log('[NotaryRoom] captureStream() method succeeded');
-                      } catch (e) {
-                        console.warn('[NotaryRoom] captureStream() failed:', e);
-                      }
-                    }
-                    
-                  if (stream) {
-                    canvasStreamRef.current = stream;
-                    const tracks = stream.getVideoTracks();
-                    const track = tracks && tracks.length > 0 ? tracks[0] : undefined;
-                    if (track) {
-                      console.log('[NotaryRoom] Canvas track created:', track.id, track.kind, track.label);
-                      console.log('[NotaryRoom] Canvas track settings:', {
-                        width: track.getSettings().width,
-                        height: track.getSettings().height,
-                        frameRate: track.getSettings().frameRate,
-                        enabled: track.enabled,
-                        readyState: track.readyState
-                      });
-                      // Label helps debugging
-                      Object.defineProperty(track, 'kind', { value: 'video' });
-                      canvasTrackRef.current = track;
-                      
-                      // Test if track is actually producing frames
-                      const testVideo = document.createElement('video');
-                      testVideo.srcObject = stream;
-                      testVideo.play().then(() => {
-                        console.log('[NotaryRoom] Canvas stream test video started');
-                        setTimeout(() => {
-                          console.log('[NotaryRoom] Canvas stream test video dimensions:', testVideo.videoWidth, 'x', testVideo.videoHeight);
-                          testVideo.remove();
-                        }, 1000);
-                      }).catch(e => {
-                        console.warn('[NotaryRoom] Canvas stream test video failed:', e);
-                      });
-                    } else {
-                      console.warn('[NotaryRoom] No video tracks found in canvas stream');
-                    }
-                  } else {
-                    console.error('[NotaryRoom] All canvas capture methods failed');
-                  }
-                  }
-                } catch (e) {
-                  console.warn('[NotaryRoom] Failed to capture canvas', e);
-                }
-              };
-              
-              if (canvas) {
-                // Try immediately
-                tryCaptureCanvas();
-                
-                // Also try after a delay in case canvas isn't ready yet
-                setTimeout(tryCaptureCanvas, 500);
-              } else {
-                // Do not immediately stop the track on transient nulls; keep it alive for a bit
-                if (canvasTrackRef.current) {
-                  console.log('[NotaryRoom] Canvas ref null temporarily, keeping track alive');
-                }
-              }
-            }}
-          />
+        {yjsRoomId ? (
+          <YjsProvider roomId={yjsRoomId} submitterUuid={identityRef.current || ''}>
+            <PdfFieldCollaborator
+              isNotary={true}
+              participantInfo={participantInfo}
+              submitterUuid={identityRef.current || ''}
+              submitterName="Notary"
+              submitters={[
+                { name: "Notary", uuid: identityRef.current || '' },
+                { name: "Client", uuid: participantInfo.client.identity }
+              ]}
+            />
+          </YjsProvider>
         ) : (
           <div className="h-full flex items-center justify-center bg-white rounded-lg shadow">
             <div className="text-center">
@@ -384,6 +299,14 @@ export default function NotaryRoom() {
           </div>
         )}
       </div>
+
+      {/* Tab Capture - produces region (DocuSeal area) + full (entire tab) */}
+      <TabCapture
+        onTracks={handleTabTracks}
+        isRecording={isRecording}
+        cropSelector="#docuseal-root"
+        onReady={(api) => { tabApiRef.current = api; }}
+      />
     </div>
   );
 }

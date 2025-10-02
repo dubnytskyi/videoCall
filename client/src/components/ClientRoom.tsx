@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import VideoRoom from "./VideoRoom";
-import PdfCollaborator from "./PdfCollaborator";
+import PdfFieldCollaborator from "./PdfFieldCollaborator";
+import { YjsProvider } from "../contexts/YjsContext";
 import { fetchTwilioToken } from "../lib/twilioToken";
 import { CollabOp, Participant } from "../types/collab";
 import { LocalDataTrack } from "twilio-video";
@@ -10,25 +11,31 @@ import { RecordingStatus } from "../lib/recordingService";
 export default function ClientRoom() {
   const navigate = useNavigate();
   const [token, setToken] = useState<string | null>(null);
-  const [localDataTrack, setLocalDataTrack] = useState<LocalDataTrack | null>(null);
   const [participantInfo, setParticipantInfo] = useState({
     notary: { identity: "Waiting...", isConnected: false, isReady: false },
     client: { identity: "Client", isConnected: true, isReady: true }
   });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [remoteData, setRemoteData] = useState<CollabOp | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus | null>(null);
+  // Dedicated video element for pdf-canvas
+  const pdfVideoRef = useRef<HTMLVideoElement | null>(null);
   
   // Stable identity that doesn't change on re-renders
   const identityRef = useRef<string | null>(null);
+  const location = useLocation();
+  const yjsRoomId = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('room') || 'test-room';
+  }, [location.search]);
   
-  // Initialize identity only once
+  // Initialize identity and room ID only once
   useEffect(() => {
     if (!identityRef.current) {
       identityRef.current = `client-${Math.random().toString(36).substr(2, 9)}`;
       console.log(`[ClientRoom] Created identity: ${identityRef.current}`);
     }
+    console.log(`[ClientRoom] Using Yjs room ID: ${yjsRoomId}`);
   }, []);
 
   useEffect(() => {
@@ -50,13 +57,13 @@ export default function ClientRoom() {
 
   const handleLocalDataTrack = useCallback((track: LocalDataTrack) => {
     console.log(`[ClientRoom] Received LocalDataTrack:`, track);
-    setLocalDataTrack(track);
+    // No longer needed - using Yjs for collaboration
   }, []);
 
   const handleRemoteData = useCallback((data: CollabOp) => {
     // Client receives data from notary
     console.log("Client received data from notary:", data);
-    setRemoteData(data);
+    // No longer needed - using Yjs for collaboration
   }, []);
 
   const handleParticipantUpdate = useCallback((participant: Participant) => {
@@ -133,6 +140,7 @@ export default function ClientRoom() {
           onRemoteData={handleRemoteData}
           onParticipantUpdate={handleParticipantUpdate}
           onRecordingStatusChange={handleRecordingStatusChange}
+          pdfVideoElRef={pdfVideoRef}
         />
         
         <div className="mt-4 p-3 bg-white rounded-lg shadow">
@@ -166,14 +174,19 @@ export default function ClientRoom() {
 
       {/* Right Panel - Document View */}
       <div className="flex-1 p-4">
-        {localDataTrack ? (
-          <PdfCollaborator
-            localDataTrack={localDataTrack}
-            onRemoteData={handleRemoteData}
-            isNotary={false}
-            participantInfo={participantInfo}
-            remoteData={remoteData}
-          />
+        {yjsRoomId ? (
+          <YjsProvider roomId={yjsRoomId} submitterUuid={identityRef.current || ''}>
+            <PdfFieldCollaborator
+              isNotary={false}
+              participantInfo={participantInfo}
+              submitterUuid={identityRef.current || ''}
+              submitterName="Client"
+              submitters={[
+                { name: "Notary", uuid: participantInfo.notary.identity },
+                { name: "Client", uuid: identityRef.current || '' }
+              ]}
+            />
+          </YjsProvider>
         ) : (
           <div className="h-full flex items-center justify-center bg-white rounded-lg shadow">
             <div className="text-center">

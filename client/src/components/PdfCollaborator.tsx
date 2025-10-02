@@ -94,12 +94,24 @@ export default function PdfCollaborator({
     }
 
     try {
+      // ALWAYS render the base PDF/document first - this ensures it never disappears
       if (pdfDoc && pdfDoc.numPages) {
         // Render actual PDF page
         const page = await pdfDoc.getPage(pageNum);
-        // Use higher scale for better quality in recordings
-        const recordingScale = Math.max(scale, 2.0); // Minimum 2x scale for recording quality
-        const viewport = page.getViewport({ scale: recordingScale });
+        
+        // Different scaling for notary vs client
+        let targetScale;
+        if (isNotary) {
+          // Notary: use higher scale for better quality in recordings
+          targetScale = Math.max(scale, 2.0);
+        } else {
+          // Client: scale to fit container width
+          const containerWidth = canvas.parentElement?.clientWidth || 800;
+          const viewport = page.getViewport({ scale: 1.0 });
+          targetScale = Math.min(containerWidth / viewport.width, 3.0); // Max 3x scale
+        }
+        
+        const viewport = page.getViewport({ scale: targetScale });
         
         if (canvas.width !== viewport.width || canvas.height !== viewport.height) {
           canvas.width = viewport.width;
@@ -110,15 +122,24 @@ export default function PdfCollaborator({
         context.imageSmoothingEnabled = true;
         context.imageSmoothingQuality = 'high';
 
+        // CRITICAL: Always render the PDF page first
         await page.render({
           canvasContext: context,
           viewport: viewport,
         }).promise;
       } else {
-        // Render fallback document with higher quality
-        const recordingScale = Math.max(scale, 2.0); // Minimum 2x scale for recording quality
-        const targetW = 612 * recordingScale;
-        const targetH = 792 * recordingScale;
+        // Render fallback document with appropriate scaling
+        let fallbackScale;
+        if (isNotary) {
+          fallbackScale = Math.max(scale, 2.0); // Minimum 2x scale for recording quality
+        } else {
+          // Client: scale to fit container width
+          const containerWidth = canvas.parentElement?.clientWidth || 800;
+          fallbackScale = Math.min(containerWidth / 612, 3.0); // Max 3x scale
+        }
+        
+        const targetW = 612 * fallbackScale;
+        const targetH = 792 * fallbackScale;
         if (canvas.width !== targetW || canvas.height !== targetH) {
           canvas.width = targetW;
           canvas.height = targetH;
@@ -128,7 +149,7 @@ export default function PdfCollaborator({
         context.imageSmoothingEnabled = true;
         context.imageSmoothingQuality = 'high';
         
-        // Clear canvas
+        // CRITICAL: Always render the base document first
         context.fillStyle = "#ffffff";
         context.fillRect(0, 0, canvas.width, canvas.height);
         
@@ -254,7 +275,7 @@ export default function PdfCollaborator({
         }
       }
 
-      // Draw existing texts for this page
+      // Draw existing texts for this page ON TOP of PDF
       const pageTexts = texts.get(pageNum) || [];
       pageTexts.forEach(text => {
         if (text.type === "text") {
@@ -288,44 +309,48 @@ export default function PdfCollaborator({
     }
     const composite = compositeRef.current;
 
-    // Set high DPI for better quality
+    // Set high DPI for better quality (fixed for session to avoid flicker)
     const devicePixelRatio = window.devicePixelRatio || 1;
     const scaleFactor = Math.max(devicePixelRatio, 2); // Minimum 2x for recording quality
+
+    // Target logical size to match Twilio composition right region (640x720)
+    const targetLogicalWidth = 640;
+    const targetLogicalHeight = 720;
+    const targetWidth = targetLogicalWidth * scaleFactor;
+    const targetHeight = targetLogicalHeight * scaleFactor;
 
     const step = () => {
       if (!base || !overlay || !composite) return;
       
-      // Calculate high-resolution dimensions
-      const targetWidth = base.width * scaleFactor;
-      const targetHeight = base.height * scaleFactor;
-      
-      if (composite.width !== targetWidth || composite.height !== targetHeight) {
-        composite.width = targetWidth;
-        composite.height = targetHeight;
-        console.log(`[PdfCollaborator] Composite canvas resized to: ${composite.width}x${composite.height} (${scaleFactor}x scale)`);
-      }
-      
+      // Fixed high-resolution backing dimensions (avoid resizing during capture to prevent flicker)
       const cctx = composite.getContext('2d');
       if (cctx) {
         // Enable high-quality rendering
+        cctx.setTransform(1, 0, 0, 1, 0, 0);
         cctx.imageSmoothingEnabled = true;
         cctx.imageSmoothingQuality = 'high';
-        
-        // Scale context for high DPI
+
+        // Work in logical pixels, scaled by scaleFactor
         cctx.scale(scaleFactor, scaleFactor);
-        
-        // Draw base PDF content
-        cctx.clearRect(0, 0, base.width, base.height);
-        cctx.drawImage(base, 0, 0);
-        // Draw overlay annotations
-        cctx.drawImage(overlay, 0, 0);
-        
-        // Add a visual indicator that this canvas is being captured
-        cctx.fillStyle = 'rgba(255, 0, 0, 0.1)';
-        cctx.fillRect(0, 0, base.width, base.height);
-        cctx.fillStyle = 'red';
-        cctx.font = '16px Arial';
-        cctx.fillText('RECORDING', 10, 30);
+
+        // Clear entire logical area with opaque background to avoid alpha flicker
+        cctx.fillStyle = '#ffffff';
+        cctx.fillRect(0, 0, targetLogicalWidth, targetLogicalHeight);
+
+        // Compute cover scaling to fill 640x720 preserving aspect ratio
+        const coverScale = Math.max(
+          targetLogicalWidth / base.width,
+          targetLogicalHeight / base.height
+        );
+        const drawW = base.width * coverScale;
+        const drawH = base.height * coverScale;
+        const offsetX = (targetLogicalWidth - drawW) / 2;
+        const offsetY = (targetLogicalHeight - drawH) / 2;
+
+        // Draw base PDF content scaled to cover
+        cctx.drawImage(base, offsetX, offsetY, drawW, drawH);
+        // Draw overlay annotations scaled to the same cover
+        cctx.drawImage(overlay, offsetX, offsetY, drawW, drawH);
       }
       compositeRafRef.current = requestAnimationFrame(step);
     };
@@ -344,16 +369,29 @@ export default function PdfCollaborator({
       
       if (base && overlay && base.width > 0 && base.height > 0) {
         console.log(`[PdfCollaborator] Starting composite with base canvas: ${base.width}x${base.height}`);
-        // Ensure composite canvas has correct size BEFORE exposing to parent
-        if (composite.width !== base.width || composite.height !== base.height) {
-          composite.width = base.width;
-          composite.height = base.height;
+        // Ensure composite canvas has fixed logical size (640x720) BEFORE exposing to parent
+        // Set backing store once before capture to stable high-resolution size
+        if (composite.width !== targetWidth || composite.height !== targetHeight) {
+          composite.width = targetWidth;
+          composite.height = targetHeight;
         }
         const cctx = composite.getContext('2d');
         if (cctx) {
-          cctx.clearRect(0, 0, composite.width, composite.height);
-          cctx.drawImage(base, 0, 0);
-          cctx.drawImage(overlay, 0, 0);
+          cctx.setTransform(1, 0, 0, 1, 0, 0);
+          // Draw opaque background first
+          cctx.fillStyle = '#ffffff';
+          cctx.fillRect(0, 0, composite.width, composite.height);
+          // Initial draw with cover scaling
+          const coverScale = Math.max(
+            targetLogicalWidth / base.width,
+            targetLogicalHeight / base.height
+          );
+          const drawW = base.width * coverScale;
+          const drawH = base.height * coverScale;
+          const offsetX = (targetLogicalWidth - drawW) / 2;
+          const offsetY = (targetLogicalHeight - drawH) / 2;
+          cctx.drawImage(base, offsetX, offsetY, drawW, drawH);
+          cctx.drawImage(overlay, offsetX, offsetY, drawW, drawH);
         }
         onCanvasRef(composite);
         compositeRafRef.current = requestAnimationFrame(step);
@@ -491,7 +529,16 @@ export default function PdfCollaborator({
   const handleRemoteData = (data: CollabOp) => {
     if (data.type === "draw") {
       console.log(`[PdfCollaborator] Received remote draw operation:`, data);
-      // For incremental segments (2 points), draw directly on canvas to avoid full re-render
+      
+      // Always update drawings state to maintain consistency
+      setDrawings(prev => {
+        const newDrawings = new Map(prev);
+        const pageDrawings = newDrawings.get(data.page) || [];
+        newDrawings.set(data.page, [...pageDrawings, data]);
+        return newDrawings;
+      });
+      
+      // For incremental segments (2 points), also draw directly on overlay for immediate feedback
       if (data.path.length === 2) {
         const overlay = overlayRef.current;
         const ctx = overlay ? overlay.getContext("2d") : null;
@@ -512,18 +559,8 @@ export default function PdfCollaborator({
           ctx.lineTo(x1, y1);
           ctx.stroke();
           ctx.restore();
-          // Do not update drawings to avoid triggering renderPage; keep it lightweight
-          return;
         }
       }
-
-      // For completed strokes (path > 2) or non-incremental, update drawings and let effect re-render
-      setDrawings(prev => {
-        const newDrawings = new Map(prev);
-        const pageDrawings = newDrawings.get(data.page) || [];
-        newDrawings.set(data.page, [...pageDrawings, data]);
-        return newDrawings;
-      });
     } else if (data.type === "text") {
       setTexts(prev => {
         const newTexts = new Map(prev);
@@ -566,8 +603,6 @@ export default function PdfCollaborator({
       // Cursor updates don't need page re-render
       return;
     }
-
-    // Don't re-render immediately - let useEffect handle it
   };
 
   // Handle remote data when it changes
@@ -578,11 +613,18 @@ export default function PdfCollaborator({
   }, [remoteData]);
 
   // Re-render page when drawings or texts change for current page
+  // Use a more controlled approach to avoid excessive re-renders
   useEffect(() => {
     if (pdfDoc && canvasRef.current) {
-      renderPage(currentPage);
+      // Only re-render if we have actual changes for the current page
+      const currentPageDrawings = drawings.get(currentPage) || [];
+      const currentPageTexts = texts.get(currentPage) || [];
+      
+      if (currentPageDrawings.length > 0 || currentPageTexts.length > 0 || isDrawing) {
+        renderPage(currentPage);
+      }
     }
-  }, [drawings, texts, currentPage, pdfDoc]);
+  }, [drawings, texts, currentPage, pdfDoc, isDrawing, renderPage]);
 
   // Update cursor position without re-rendering the page
   useEffect(() => {
@@ -680,11 +722,11 @@ export default function PdfCollaborator({
 
       {/* PDF Viewer */}
       <div className="flex-1 overflow-auto p-4">
-        <div ref={containerRef} className="flex justify-center">
-          <div className="relative">
+        <div ref={containerRef} className={`${isNotary ? 'flex justify-center' : 'w-full'}`}>
+          <div className={`relative ${isNotary ? '' : 'w-full'}`}>
             <canvas
               ref={canvasRef}
-              className="border border-gray-300 shadow-lg"
+              className={`border border-gray-300 shadow-lg ${isNotary ? '' : 'w-full h-auto'}`}
             />
             <canvas
               ref={overlayRef}
