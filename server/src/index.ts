@@ -568,6 +568,8 @@ app.get("/api/health", (req, res) => {
 
 const port = parseInt(process.env.PORT || "4000", 10);
 const wsPort = parseInt(process.env.WS_PORT || "1234", 10);
+
+// In production, use the same port for both HTTP and WebSocket
 const server = app.listen(port, "0.0.0.0", () => {
   console.log(`Token server running on http://0.0.0.0:${port}`);
   console.log(`Health check: http://localhost:${port}/api/health`);
@@ -575,7 +577,11 @@ const server = app.listen(port, "0.0.0.0", () => {
 });
 
 // WebSocket server for Yjs collaboration
-const wss = new WebSocketServer({ port: wsPort });
+// In production (Railway), use the same port as HTTP server
+const wss = new WebSocketServer({
+  port: process.env.NODE_ENV === "production" ? undefined : wsPort,
+  server: process.env.NODE_ENV === "production" ? server : undefined,
+});
 
 // Store documents by room name
 const docs = new Map<string, Y.Doc>();
@@ -628,4 +634,8 @@ wss.on("connection", (ws, req) => {
   });
 });
 
-console.log(`WebSocket server running on ws://localhost:${wsPort}`);
+if (process.env.NODE_ENV === "production") {
+  console.log(`WebSocket server running on same port as HTTP server: ${port}`);
+} else {
+  console.log(`WebSocket server running on ws://localhost:${wsPort}`);
+}
