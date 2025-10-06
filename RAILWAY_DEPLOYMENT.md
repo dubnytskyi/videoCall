@@ -22,9 +22,12 @@ NODE_ENV=production
 
 ### 3. Деплой
 1. Railway використовує `nixpacks.toml` для конфігурації
-2. Запустить `yarn install` (встановить залежності для всього проекту)
-3. Запустить `yarn run build` (збере сервер - тепер це `npm run build:server`)
-4. Запустить `npm start` (запустить сервер з папки `server/`)
+2. Запустить `yarn install --frozen-lockfile` (встановить залежності для всього проекту)
+3. Запустить `cd server && npm install --include=dev` (встановить залежності сервера включаючи devDependencies)
+4. Запустить `cd server && npm run build` (збере сервер з TypeScript)
+5. Запустить `npm start` (запустить сервер з папки `server/`)
+
+**Важливо:** TypeScript тепер встановлений як dependency (не devDependency) в `server/package.json`, щоб забезпечити роботу збірки в production середовищі.
 
 ### 4. Отримання URL
 Після деплою Railway надасть URL типу:
